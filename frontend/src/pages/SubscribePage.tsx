@@ -10,6 +10,7 @@ const VERSE_ICONS: Record<VerseType, string> = { BIBLE: '📖', GITA: '🪷' };
 export function SubscribePage() {
   const [step, setStep] = useState<Step>('phone');
   const [options, setOptions] = useState<Options>();
+  const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [verseType, setVerseType] = useState<VerseType>();
   const [subscription, setSubscription] = useState<Subscription>();
@@ -25,6 +26,14 @@ export function SubscribePage() {
   const submitPhone = (e: FormEvent) => {
     e.preventDefault();
     setError(undefined);
+    if (!name.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+    if (!/^[\p{L}\p{M}][\p{L}\p{M} .'-]*$/u.test(name.trim())) {
+      setError('Name can only contain letters, spaces, dots, apostrophes and hyphens.');
+      return;
+    }
     if (!isValidPhoneNumber(phone, region)) {
       setError('Please enter a valid mobile number (country code optional for India).');
       return;
@@ -37,7 +46,7 @@ export function SubscribePage() {
     setBusy(true);
     setError(undefined);
     try {
-      const sub = await api.subscribe(phone, type);
+      const sub = await api.subscribe(name.trim(), phone, type);
       setSubscription(sub);
       setStep(sub.status === 'ACTIVE' ? 'done' : 'confirm');
     } catch (err) {
@@ -57,13 +66,25 @@ export function SubscribePage() {
 
   return (
     <>
-      <Progress step={step} />
+      <Progress step={step} withConfirm={options?.optInMode === 'whatsapp_confirm'} />
       {step === 'phone' && (
         <form onSubmit={submitPhone} noValidate>
           <h1>A verse for your morning, on WhatsApp</h1>
           <p className="lead">
             Get one Bible or Bhagavad Gita verse every day{options ? ` at ${options.sendTime}` : ''}. Free, no app, unsubscribe anytime.
           </p>
+          <label htmlFor="name">Your name</label>
+          <input
+            id="name"
+            type="text"
+            autoComplete="given-name"
+            placeholder="e.g. Priya"
+            maxLength={60}
+            value={name}
+            onChange={(e) => (setName(e.target.value), setError(undefined))}
+            autoFocus
+          />
+          <div className="field-gap" />
           <label htmlFor="phone">Your WhatsApp number</label>
           <div className="phone-field">
             <span className="prefix">{region === 'IN' ? '🇮🇳 +91' : '+'}</span>
@@ -74,10 +95,9 @@ export function SubscribePage() {
               autoComplete="tel"
               placeholder="98765 43210"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => (setPhone(e.target.value), setError(undefined))}
               aria-invalid={!!error}
               aria-describedby="phone-help"
-              autoFocus
             />
           </div>
           <p id="phone-help" className="help">
@@ -94,7 +114,7 @@ export function SubscribePage() {
         <section>
           <h1>What would you like to receive?</h1>
           <p className="lead">
-            Verses will be sent to <b>{formatted}</b>.{' '}
+            Hi {name.trim().split(' ')[0]}! Verses will be sent to <b>{formatted}</b>.{' '}
             <button className="link" onClick={() => setStep('phone')}>
               Change
             </button>
@@ -129,12 +149,13 @@ const defaultTypes: Options['verseTypes'] = [
   { id: 'GITA', label: 'Bhagavad Gita verses', description: 'Sanskrit with English translation' },
 ];
 
-function Progress({ step }: { step: Step }) {
-  const steps: Step[] = ['phone', 'type', 'confirm'];
-  const current = step === 'done' ? 3 : steps.indexOf(step);
+function Progress({ step, withConfirm }: { step: Step; withConfirm: boolean }) {
+  const steps: Step[] = withConfirm ? ['phone', 'type', 'confirm'] : ['phone', 'type'];
+  const labels = withConfirm ? ['Your details', 'Verses', 'Confirm'] : ['Your details', 'Verses'];
+  const current = step === 'done' ? steps.length : steps.indexOf(step);
   return (
     <ol className="progress" aria-label="Progress">
-      {['Number', 'Verses', 'Confirm'].map((label, i) => (
+      {labels.map((label, i) => (
         <li key={label} className={i < current ? 'complete' : i === current ? 'current' : ''}>
           {label}
         </li>
@@ -193,9 +214,10 @@ function Done({ subscription }: { subscription: Subscription }) {
       <div className="success-mark" aria-hidden>
         ✓
       </div>
-      <h1>You're subscribed!</h1>
+      <h1>Thank you{subscription.name ? `, ${subscription.name.split(' ')[0]}` : ''}!</h1>
       <p className="lead">
-        Your first {subscription.verseType === 'BIBLE' ? 'Bible' : 'Bhagavad Gita'} verse is on its way to {subscription.phone}. After that, one verse arrives every day.
+        You'll get a welcome message on WhatsApp at {subscription.phone} in a moment. Your daily{' '}
+        {subscription.verseType === 'BIBLE' ? 'Bible' : 'Bhagavad Gita'} verses start tomorrow morning.
       </p>
       <p className="help">
         Reply <b>STOP</b> on WhatsApp to unsubscribe, or keep this link: <a href={manageUrl}>manage subscription</a>.

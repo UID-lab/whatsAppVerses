@@ -41,6 +41,8 @@ model Subscriber {
   id                   Int              @id @default(autoincrement())
   /// E.164, e.g. +918971775506. One row per number (duplicate registrations are impossible).
   phoneE164            String           @unique @db.VarChar(20)
+  /// Name entered on the sign-up form; used to greet the subscriber.
+  name                 String           @default("") @db.VarChar(80)
   verseType            VerseType
   status               SubscriberStatus @default(PENDING)
   /// Provider-specific reply address learned from the user's own opt-in message

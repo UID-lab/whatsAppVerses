@@ -1,7 +1,8 @@
 # Daily Verse on WhatsApp
 
-People subscribe on a React page, choose **Bible** or **Bhagavad Gita** verses, and get one verse a
-day on WhatsApp from **+91 89717 75506**. It's all free, self-hosted software: NestJS + Prisma +
+People enter their name and number on a React page, choose **Bible** or **Bhagavad Gita** verses,
+get a personal welcome message right away, and then one verse every morning on WhatsApp from
+**+91 89717 75506**. It's all free, self-hosted software: NestJS + Prisma +
 MySQL, with no per-message API costs.
 
 > **New here? Follow [GETTING_STARTED.md](GETTING_STARTED.md)** for step-by-step setup on a Mac.
@@ -36,10 +37,11 @@ A `console` provider logs messages instead of sending them, for development.
 
 ### Ban-risk reductions built in
 
-- **Users message you first.** After the web form, the user sends `JOIN <code>` to your number
-  (a one-tap `wa.me` link). WhatsApp's spam systems mainly punish messages to people who never
-  wrote to you and report you. This also proves the person owns the number, so nobody can sign up
-  someone else. (`OPT_IN_MODE=direct` turns this off. Not recommended.)
+- **Opt-in mode.** By default (`OPT_IN_MODE=direct`) a subscriber is active as soon as they submit
+  the form, and the welcome message goes out immediately. That's the simplest flow, but it messages
+  people who never wrote to you, which WhatsApp's spam systems watch for, and anyone can type
+  someone else's number. `OPT_IN_MODE=whatsapp_confirm` adds a step where the user sends
+  `JOIN <code>` to your number first: lower ban risk, and it proves they own the number.
 - **Slow, jittered pacing:** 6 messages/min by default, ±30% random spacing, a "typing…" indicator,
   a hard `DAILY_SEND_CAP` (400) and a send window (07:00–21:30 IST).
 - **Different text per person:** each subscriber starts at a random point in the rotation, so

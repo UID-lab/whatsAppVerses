@@ -61,12 +61,18 @@ export class EnvironmentVariables {
   DEFAULT_PHONE_REGION: string = 'IN';
 
   /**
-   * whatsapp_confirm (recommended): the user proves ownership by sending "JOIN <code>" to our
-   * number; nobody is messaged until they write to us first.
-   * direct: subscribers are ACTIVE as soon as they submit the form (higher ban risk).
+   * direct: subscribers are ACTIVE as soon as they submit the form and immediately get the
+   * welcome message (simplest flow; we message people who haven't written to us first, which
+   * carries more WhatsApp ban risk).
+   * whatsapp_confirm: the user must first send "JOIN <code>" to our number (safer, proves
+   * ownership of the number).
    */
   @IsIn(['whatsapp_confirm', 'direct'])
-  OPT_IN_MODE: 'whatsapp_confirm' | 'direct' = 'whatsapp_confirm';
+  OPT_IN_MODE: 'whatsapp_confirm' | 'direct' = 'direct';
+
+  /** Shown in the welcome message: "Thank you for subscribing to <BRAND_NAME>". */
+  @IsString() @MinLength(1)
+  BRAND_NAME: string = 'U!D Labs';
 
   @IsInt() @Min(1) @Max(720)
   CONFIRM_CODE_TTL_HOURS: number = 48;

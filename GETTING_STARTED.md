@@ -31,10 +31,10 @@ cd ~/Desktop/verse-whatsapp
 ## 1. Start MySQL
 
 ```bash
-docker run -d --name verses-mysql -p 3306:3306 -e MYSQL_DATABASE=verses -e MYSQL_USER=verses -e MYSQL_PASSWORD=verses -e MYSQL_ROOT_PASSWORD=root mysql:8.4 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+docker run -d --name verses-mysql -p 3307:3306 -e MYSQL_DATABASE=verses -e MYSQL_USER=verses -e MYSQL_PASSWORD=verses -e MYSQL_ROOT_PASSWORD=root mysql:8.4 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 ```
 
-Wait about 20 seconds for MySQL to finish starting.
+Wait about 20 seconds for MySQL to finish starting. (Port **3307** on your Mac avoids clashing with any other MySQL already using 3306.)
 
 > Later, after a reboot: `docker start verses-mysql` (your data is kept).
 
@@ -54,7 +54,7 @@ Generate an admin key and copy the output:
 openssl rand -hex 24
 ```
 
-Open `backend/.env` in any editor (for example `open -e .env`) and change:
+Open `backend/.env` in any editor (for example `open -e .env`) and change (`OPT_IN_MODE=direct` and `BRAND_NAME=U!D Labs` are already set):
 
 ```
 ADMIN_API_KEY=<paste the key you just generated>
@@ -62,14 +62,16 @@ MESSAGING_PROVIDER=console
 ```
 
 `console` prints messages in the terminal instead of sending them on WhatsApp, so it's safe for a first run.
-The default `DATABASE_URL=mysql://verses:verses@localhost:3306/verses` already matches step 1.
+Set `DATABASE_URL=mysql://verses:verses@localhost:3307/verses` to match step 1.
+
+> Always run `npm run …` commands **inside `backend/`**. Running `npx prisma` elsewhere downloads a newer, incompatible Prisma.
 
 ---
 
 ## 3. Create the tables and load the verses
 
 ```bash
-npx prisma migrate deploy
+npm run prisma:migrate:deploy
 npm run prisma:seed
 ```
 
@@ -111,24 +113,64 @@ npm run dev
 | Page | URL |
 |---|---|
 | Sign-up | http://localhost:5173 |
-| Manage / unsubscribe | link shown after subscribing (`/manage?token=…`) |
+| Manage / unsubscribe | `/manage?token=…` (link on the "Thank you" screen) |
 | Admin (WhatsApp link, stats) | http://localhost:5173/admin (enter your `ADMIN_API_KEY`) |
 
-1. Enter a phone number, continue, and pick **Bible** or **Bhagavad Gita**.
-2. The page shows a code like `JOIN ABC123` and waits for that WhatsApp message.
-3. In console mode nobody can send it on WhatsApp, so simulate the reply (use your admin key, the number you entered and the code shown):
+1. Enter your **name** and **WhatsApp number**, continue, and pick **Bible** or **Bhagavad Gita**.
+2. The page says **"Thank you, <name>!"**. The subscriber is saved right away, and this welcome
+   message is sent (printed in the backend terminal in console mode):
 
-```bash
-curl -X POST localhost:3000/api/admin/dev/simulate-inbound -H "x-admin-key: YOUR_ADMIN_KEY" -H 'content-type: application/json' -d '{"phone":"9876543210","text":"JOIN ABC123"}'
-```
+   ```
+   Hi <name>,
 
-The page switches to **"You're subscribed!"**, and the welcome verse is printed in the backend terminal.
+   Thank you for subscribing to U!D Labs. Your verses will start from tomorrow morning.
 
-Optional: send today's verse to all active subscribers right away (it otherwise happens automatically at 07:00 IST):
+   Let's hold hands and begin the path with joy!
+
+   Reply STOP anytime to unsubscribe.
+   ```
+
+3. From the next morning, a verse is sent every day at `DAILY_SEND_TIME` (see below).
+
+To send today's verses right away for testing (subscribers who got the welcome message today
+are skipped until tomorrow):
 
 ```bash
 curl -X POST localhost:3000/api/admin/jobs/enqueue-today -H "x-admin-key: YOUR_ADMIN_KEY"
 ```
+
+### Change the wording
+
+- Brand name: `BRAND_NAME=U!D Labs` in `backend/.env`.
+- Welcome and daily message text: `backend/src/verses/verse-formatter.ts`
+  (`formatWelcomeMessage` and `formatVerseMessage`).
+
+---
+
+## Configure the daily send time
+
+All in `backend/.env` (24-hour `HH:MM`, in `APP_TIMEZONE`, India time by default). Restart the
+backend after changing.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DAILY_SEND_TIME` | `07:00` | When the day's verses start going out |
+| `SEND_WINDOW_START` | `07:00` | Daily verses are never sent before this… |
+| `SEND_WINDOW_END` | `21:30` | …or after this (late ones wait for tomorrow) |
+| `APP_TIMEZONE` | `Asia/Kolkata` | Time zone for all of the above |
+| `MESSAGES_PER_MINUTE` | `6` | Sending pace (keep it low on a personal number) |
+
+Example, to send at 6:30 AM:
+
+```
+DAILY_SEND_TIME=06:30
+SEND_WINDOW_START=06:30
+```
+
+Keep `SEND_WINDOW_START` at or before `DAILY_SEND_TIME`; otherwise sending waits for the window to open.
+The scheduler checks every 5 minutes, so sending starts within 5 minutes of `DAILY_SEND_TIME`. At
+6 messages per minute, 100 subscribers take about 17 minutes. The welcome message is a direct
+reply and goes out at any time of day.
 
 ---
 
@@ -143,7 +185,9 @@ curl -X POST localhost:3000/api/admin/jobs/enqueue-today -H "x-admin-key: YOUR_A
    (Or click **Get pairing code** and choose *Link with phone number instead* on the phone.)
 5. The status changes to **open**. The link is stored in MySQL, so restarting doesn't require scanning again.
 
-Now real users can subscribe: they tap **Open WhatsApp and send**, the `JOIN` message reaches your number, and they get their first verse.
+Now real users can subscribe: they enter their name and number, pick a verse type, and get the welcome message from +91 89717 75506 within seconds. Verses follow every morning.
+
+> Test with a **different** number from 89717 75506. A number can't message itself.
 
 > Your Mac must stay awake with the backend running for the daily 07:00 messages to go out. For an always-on free setup, see "Deploy for free" in README.md (Oracle Cloud Always Free VM + `docker compose up -d --build`).
 
@@ -173,7 +217,7 @@ npm test
 |---|---|
 | `Invalid environment configuration` on start | A value in `backend/.env` is wrong. The message names the variable (e.g. `ADMIN_API_KEY` must be at least 24 characters). |
 | `Can't reach database server` | Docker Desktop isn't running, or MySQL is still starting: `docker start verses-mysql` and wait 20 s. |
-| `port 3306 is already allocated` | Another MySQL is running. Stop it, or map another port (`-p 3307:3306`) and use `localhost:3307` in `DATABASE_URL`. |
+| `port … is already allocated` | Something else uses that port. Map another one (e.g. `-p 3308:3306`) and use the same port in `DATABASE_URL`. |
 | Error mentioning `require()` of an ES module | Node.js is older than 22.12: `node -v`, then upgrade. |
 | Admin page says the key is invalid | Use exactly the `ADMIN_API_KEY` from `backend/.env` (restart the backend after changing it). |
 | QR code doesn't appear | Make sure `MESSAGING_PROVIDER=baileys` and the backend was restarted. Check the backend terminal for errors. |

@@ -1,12 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { SubscriberStatus } from '@prisma/client';
+import { DeliveryKind, SubscriberStatus } from '@prisma/client';
 import { AppConfigService } from '../config/app-config.service';
 import { isWithinWindow, sleep } from '../common/time/time.util';
 import { PermanentSendError } from '../messaging/messaging.types';
 import { DailyCapReachedError, OutboundService } from '../messaging/outbound.service';
 import { SenderLeadershipService } from '../messaging/sender-leadership.service';
 import { VersesService } from '../verses/verses.service';
-import { formatVerseMessage } from '../verses/verse-formatter';
+import { formatVerseMessage, formatWelcomeMessage } from '../verses/verse-formatter';
 import { retryDelayMs } from './backoff';
 import { ClaimedDelivery, DeliveryRepository } from './delivery.repository';
 
@@ -112,24 +112,29 @@ export class DeliveryWorkerService implements OnModuleInit {
       return;
     }
 
-    let verse = d.verse;
-    if (!verse) {
-      verse = await this.verses.verseFor(sub);
+    let text: string;
+    const isWelcome = d.kind === DeliveryKind.WELCOME;
+    if (isWelcome) {
+      // Greeting only; the first verse goes out with tomorrow's daily run.
+      text = formatWelcomeMessage(sub.name, this.config.get('BRAND_NAME'));
+    } else {
+      let verse = d.verse;
       if (!verse) {
-        await this.repo.markRetry(d.id, 'No verses available (seed not run?)', 30 * 60_000, true);
-        return;
+        verse = await this.verses.verseFor(sub);
+        if (!verse) {
+          await this.repo.markRetry(d.id, 'No verses available (seed not run?)', 30 * 60_000, true);
+          return;
+        }
+        await this.repo.assignVerse(d.id, verse.id);
       }
-      await this.repo.assignVerse(d.id, verse.id);
+      text = formatVerseMessage(verse);
     }
-
-    const manageUrl = `${this.config.get('PUBLIC_WEB_URL').replace(/\/$/, '')}/manage?token=${sub.manageToken}`;
-    const text = formatVerseMessage(verse, { kind: d.kind, manageUrl });
 
     if (!(await this.repo.markSending(d.id, this.config.instanceId))) return; // lock lost
 
     try {
       const result = await this.outbound.send({ phoneE164: sub.phoneE164, channelAddress: sub.channelAddress }, text);
-      await this.repo.markSent(d.id, sub.id, result.providerMessageId, result.resolvedAddress);
+      await this.repo.markSent(d.id, sub.id, result.providerMessageId, result.resolvedAddress, !isWelcome);
     } catch (err) {
       const message = (err as Error).message;
       if (err instanceof DailyCapReachedError) {

@@ -2,6 +2,7 @@ export type VerseType = 'BIBLE' | 'GITA';
 export type SubscriberStatus = 'PENDING' | 'ACTIVE' | 'UNSUBSCRIBED';
 
 export interface Subscription {
+  name: string;
   status: SubscriberStatus;
   verseType: VerseType;
   phone: string;
@@ -48,8 +49,8 @@ async function request<T>(path: string, init: RequestInit & { adminKey?: string 
 
 export const api = {
   options: () => request<Options>('/subscribers/options'),
-  subscribe: (phone: string, verseType: VerseType) =>
-    request<Subscription>('/subscribers', { method: 'POST', body: JSON.stringify({ phone, verseType }) }),
+  subscribe: (name: string, phone: string, verseType: VerseType) =>
+    request<Subscription>('/subscribers', { method: 'POST', body: JSON.stringify({ name, phone, verseType }) }),
   getSubscription: (token: string) => request<Subscription>(`/subscribers/manage/${encodeURIComponent(token)}`),
   unsubscribe: (token: string) =>
     request<Subscription>(`/subscribers/manage/${encodeURIComponent(token)}/unsubscribe`, { method: 'POST' }),

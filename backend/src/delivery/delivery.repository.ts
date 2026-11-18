@@ -54,8 +54,9 @@ export class DeliveryRepository {
   }
 
   /**
-   * Queue the welcome verse for today. If a daily delivery already exists for today and hasn't
-   * gone out, it is converted into the welcome message instead (still one message per day).
+   * Queue the welcome greeting for today. It takes today's slot, so the first verse arrives
+   * tomorrow morning. If a daily delivery already exists for today and hasn't gone out, it is
+   * converted into the welcome message (still one message per day).
    * Returns false when something was already sent today.
    */
   async scheduleWelcome(subscriberId: number, date: Date): Promise<boolean> {
@@ -129,7 +130,15 @@ export class DeliveryRepository {
     return res.count === 1;
   }
 
-  async markSent(id: bigint, subscriberId: number, providerMessageId: string | null, resolvedAddress?: string | null) {
+  /** `advanceProgress` is false for the welcome greeting, which carries no verse. */
+  async markSent(
+    id: bigint,
+    subscriberId: number,
+    providerMessageId: string | null,
+    resolvedAddress: string | null | undefined,
+    advanceProgress: boolean,
+  ) {
+    const step = advanceProgress ? 1 : 0;
     await this.prisma.$transaction([
       this.prisma.delivery.update({
         where: { id },
@@ -144,7 +153,7 @@ export class DeliveryRepository {
       }),
       this.prisma.$executeRaw`
         UPDATE subscribers
-        SET progress = progress + 1, lastDeliveredAt = NOW(3), consecutiveFailures = 0,
+        SET progress = progress + ${step}, lastDeliveredAt = NOW(3), consecutiveFailures = 0,
             channelAddress = COALESCE(channelAddress, ${resolvedAddress ?? null}), updatedAt = NOW(3)
         WHERE id = ${subscriberId}`,
     ]);

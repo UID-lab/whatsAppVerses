@@ -50,6 +50,7 @@ export class SubscribersService {
     const direct = this.config.get('OPT_IN_MODE') === 'direct';
     const now = new Date();
     const common = {
+      name: dto.name,
       verseType: dto.verseType,
       status: direct ? SubscriberStatus.ACTIVE : SubscriberStatus.PENDING,
       confirmCodeExpiresAt: direct ? null : new Date(now.getTime() + this.config.get('CONFIRM_CODE_TTL_HOURS') * 3600_000),
@@ -165,6 +166,7 @@ export class SubscribersService {
     const pending = sub.status === SubscriberStatus.PENDING && sub.confirmCode && sub.confirmCodeExpiresAt;
     const text = sub.confirmCode ? confirmMessage(sub.confirmCode) : '';
     return {
+      name: sub.name,
       status: sub.status,
       verseType: sub.verseType,
       phone: maskPhone(sub.phoneE164),

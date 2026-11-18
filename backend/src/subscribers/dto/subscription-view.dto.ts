@@ -2,6 +2,7 @@ import { SubscriberStatus, VerseType } from '@prisma/client';
 
 /** What the API returns about a subscription. Never includes the full phone number. */
 export interface SubscriptionView {
+  name: string;
   status: SubscriberStatus;
   verseType: VerseType;
   phone: string; // masked

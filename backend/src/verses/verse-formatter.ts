@@ -1,20 +1,27 @@
-import { DeliveryKind, Verse, VerseType } from '@prisma/client';
+import { Verse, VerseType } from '@prisma/client';
 
-export interface FormatOptions {
-  kind: DeliveryKind;
-  /** Web link to unsubscribe (included in the welcome message). */
-  manageUrl?: string;
+/**
+ * Message texts sent on WhatsApp. Edit the wording here.
+ * WhatsApp formatting: *bold*, _italic_.
+ */
+
+/** First message after sign-up. Verses start the next morning. */
+export function formatWelcomeMessage(name: string, brandName: string): string {
+  const greeting = name.trim() ? `Hi ${name.trim()},` : 'Hi,';
+  return [
+    greeting,
+    '',
+    `Thank you for subscribing to ${brandName}. Your verses will start from tomorrow morning.`,
+    '',
+    "Let's hold hands and begin the path with joy!",
+    '',
+    'Reply STOP anytime to unsubscribe.',
+  ].join('\n');
 }
 
-/** Renders a verse as a WhatsApp message (WhatsApp supports *bold* and _italic_). */
-export function formatVerseMessage(verse: Verse, opts: FormatOptions): string {
+/** The daily verse. */
+export function formatVerseMessage(verse: Verse): string {
   const lines: string[] = [];
-
-  if (opts.kind === 'WELCOME') {
-    const what = verse.type === VerseType.BIBLE ? 'a Bible verse' : 'a verse from the Bhagavad Gita';
-    lines.push(`🙏 Welcome! You'll receive ${what} here every day. Here is your first one:`, '');
-  }
-
   if (verse.type === VerseType.BIBLE) {
     lines.push(`📖 *${verse.reference}*`, '', `"${verse.text}"`, '', `_${verse.reference} (${verse.translation})_`);
   } else {
@@ -22,8 +29,6 @@ export function formatVerseMessage(verse: Verse, opts: FormatOptions): string {
     if (verse.originalText) lines.push(verse.originalText.replace(/।।\s*[\d.]+\s*।।\s*$/u, '').trim(), '');
     lines.push(verse.text, '', `_Translation: ${verse.translation}_`);
   }
-
   lines.push('', 'Reply *STOP* to unsubscribe.');
-  if (opts.kind === 'WELCOME' && opts.manageUrl) lines.push(`Manage: ${opts.manageUrl}`);
   return lines.join('\n');
 }

@@ -1,5 +1,5 @@
 import { Verse } from '@prisma/client';
-import { formatVerseMessage } from './verse-formatter';
+import { formatVerseMessage, formatWelcomeMessage } from './verse-formatter';
 
 const bible: Verse = {
   id: 1,
@@ -28,21 +28,38 @@ const gita: Verse = {
   translation: 'Shri Purohit Swami',
 };
 
+describe('formatWelcomeMessage', () => {
+  it('greets by name and says verses start tomorrow', () => {
+    expect(formatWelcomeMessage('Priya', 'U!D Labs')).toBe(
+      [
+        'Hi Priya,',
+        '',
+        'Thank you for subscribing to U!D Labs. Your verses will start from tomorrow morning.',
+        '',
+        "Let's hold hands and begin the path with joy!",
+        '',
+        'Reply STOP anytime to unsubscribe.',
+      ].join('\n'),
+    );
+  });
+
+  it('falls back gracefully without a name', () => {
+    expect(formatWelcomeMessage('', 'U!D Labs').startsWith('Hi,\n')).toBe(true);
+  });
+});
+
 describe('formatVerseMessage', () => {
-  it('formats a daily Bible verse with an opt-out hint', () => {
-    const text = formatVerseMessage(bible, { kind: 'DAILY' });
+  it('formats a Bible verse with an opt-out hint', () => {
+    const text = formatVerseMessage(bible);
     expect(text).toContain('*John 3:16*');
     expect(text).toContain('"For God so loved the world…"');
     expect(text).toContain('Reply *STOP* to unsubscribe.');
-    expect(text).not.toContain('Welcome');
   });
 
-  it('formats a Gita welcome message with Sanskrit, translation credit and manage link', () => {
-    const text = formatVerseMessage(gita, { kind: 'WELCOME', manageUrl: 'https://x.test/manage?token=abc' });
-    expect(text).toContain('Welcome');
+  it('formats a Gita verse with Sanskrit and translation credit', () => {
+    const text = formatVerseMessage(gita);
     expect(text).toContain('कर्मण्येवाधिकारस्ते मा फलेषु कदाचन');
     expect(text).not.toContain('2.47।।');
     expect(text).toContain('Translation: Shri Purohit Swami');
-    expect(text).toContain('https://x.test/manage?token=abc');
   });
 });

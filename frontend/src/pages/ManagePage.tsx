@@ -35,6 +35,12 @@ export function ManagePage() {
     <section>
       <h1>Your subscription</h1>
       <dl className="facts">
+        {sub.name && (
+          <>
+            <dt>Name</dt>
+            <dd>{sub.name}</dd>
+          </>
+        )}
         <dt>Number</dt>
         <dd>{sub.phone}</dd>
         <dt>Receiving</dt>
