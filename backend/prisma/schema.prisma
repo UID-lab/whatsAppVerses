@@ -1,0 +1,183 @@
+// Prisma schema — MySQL 8.0+ (or MariaDB 10.6+). Requires `FOR UPDATE SKIP LOCKED`.
+// Table names are snake_case via @@map; columns keep Prisma's camelCase names.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum VerseType {
+  BIBLE
+  GITA
+}
+
+enum SubscriberStatus {
+  PENDING // registered on the web, waiting for the WhatsApp confirmation message
+  ACTIVE // opted in; receives the daily verse
+  UNSUBSCRIBED // opted out (STOP / unsubscribe link); kept so we never message them again by accident
+}
+
+enum DeliveryKind {
+  WELCOME // first verse, sent right after opt-in confirmation
+  DAILY // scheduled daily verse
+}
+
+enum DeliveryStatus {
+  PENDING // queued, waiting for nextAttemptAt
+  PROCESSING // claimed by a worker (lease in lockedBy/lockedUntil)
+  SENDING // handed to the WhatsApp provider; outcome not yet recorded
+  SENT // provider accepted the message
+  FAILED // permanent failure or attempts exhausted
+  UNKNOWN // worker died mid-send; never retried, so nobody gets a duplicate
+  SKIPPED // subscriber opted out before the send
+  EXPIRED // not sent before its day ended (capacity / downtime)
+}
+
+model Subscriber {
+  id                   Int              @id @default(autoincrement())
+  /// E.164, e.g. +918971775506. One row per number (duplicate registrations are impossible).
+  phoneE164            String           @unique @db.VarChar(20)
+  verseType            VerseType
+  status               SubscriberStatus @default(PENDING)
+  /// Provider-specific reply address learned from the user's own opt-in message
+  /// (a WhatsApp JID). Preferred over phoneE164 for delivery when present.
+  channelAddress       String?          @db.VarChar(100)
+  /// Short code the user sends to our number ("JOIN K7P2QX") to prove they own the number.
+  confirmCode          String?          @unique @db.VarChar(12)
+  confirmCodeExpiresAt DateTime?        @db.DateTime(3)
+  /// Secret for the web status / unsubscribe link. Never logged.
+  manageToken          String           @unique @db.Char(32)
+  /// Random start position in the verse rotation, so subscribers don't all get identical text.
+  rotationOffset       Int
+  /// Number of verses successfully delivered; next verse = rotation[(offset + progress) % poolSize].
+  progress             Int              @default(0)
+  consecutiveFailures  Int              @default(0)
+  optedInAt            DateTime?        @db.DateTime(3)
+  optedOutAt           DateTime?        @db.DateTime(3)
+  lastDeliveredAt      DateTime?        @db.DateTime(3)
+  createdAt            DateTime         @default(now()) @db.DateTime(3)
+  updatedAt            DateTime         @updatedAt @db.DateTime(3)
+
+  deliveries Delivery[]
+
+  // Keyset pagination for the daily enqueue: WHERE status='ACTIVE' AND id > ? ORDER BY id
+  @@index([status, id])
+  @@index([channelAddress])
+  @@map("subscribers")
+}
+
+model Verse {
+  id              Int       @id @default(autoincrement())
+  type            VerseType
+  /// Human-readable reference, e.g. "John 3:16" or "Bhagavad Gita 2.47".
+  reference       String    @db.VarChar(64)
+  book            String    @db.VarChar(40)
+  chapter         Int       @db.SmallInt
+  verse           Int       @db.SmallInt
+  /// English text.
+  text            String    @db.Text
+  /// Original-language text (Sanskrit for the Gita).
+  originalText    String?   @db.Text
+  transliteration String?   @db.Text
+  translation     String    @db.VarChar(64)
+  /// Position in the deterministic, pre-shuffled rotation. NULL = not used for daily sends
+  /// (e.g. genealogies / sentence fragments).
+  rotationIndex   Int?
+
+  deliveries Delivery[]
+
+  @@unique([type, book, chapter, verse])
+  @@unique([type, rotationIndex])
+  @@map("verses")
+}
+
+model Delivery {
+  id                BigInt         @id @default(autoincrement())
+  subscriberId      Int
+  /// Local calendar day (APP_TIMEZONE) this delivery belongs to.
+  deliveryDate      DateTime       @db.Date
+  kind              DeliveryKind   @default(DAILY)
+  status            DeliveryStatus @default(PENDING)
+  verseId           Int?
+  attempts          Int            @default(0)
+  nextAttemptAt     DateTime       @default(now()) @db.DateTime(3)
+  lockedBy          String?        @db.VarChar(64)
+  lockedUntil       DateTime?      @db.DateTime(3)
+  providerMessageId String?        @db.VarChar(128)
+  lastError         String?        @db.VarChar(500)
+  sentAt            DateTime?      @db.DateTime(3)
+  createdAt         DateTime       @default(now()) @db.DateTime(3)
+  updatedAt         DateTime       @updatedAt @db.DateTime(3)
+
+  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  verse      Verse?     @relation(fields: [verseId], references: [id], onDelete: SetNull)
+
+  /// Idempotency: at most one message per subscriber per day, however many times the cron runs.
+  @@unique([subscriberId, deliveryDate])
+  /// Queue claim: WHERE status='PENDING' AND nextAttemptAt <= NOW() ORDER BY nextAttemptAt
+  @@index([status, nextAttemptAt])
+  /// Reaper: WHERE status IN ('PROCESSING','SENDING') AND lockedUntil < NOW()
+  @@index([status, lockedUntil])
+  /// Expiry, stats and retention purge.
+  @@index([deliveryDate, status])
+  @@index([verseId])
+  @@map("deliveries")
+}
+
+/// Baileys (WhatsApp Web multi-device) credentials and Signal keys, persisted in MySQL so the
+/// linked session survives restarts and redeploys on hosts with ephemeral disks.
+model WhatsAppAuth {
+  sessionId String   @db.VarChar(64)
+  key       String   @db.VarChar(191)
+  value     String   @db.LongText
+  updatedAt DateTime @updatedAt @db.DateTime(3)
+
+  @@id([sessionId, key])
+  @@map("whatsapp_auth")
+}
+
+/// Last known state of the WhatsApp connection, written by the sender instance so that any API
+/// instance can show it (and the current QR code) on the admin page.
+model SenderState {
+  id         String   @id @db.VarChar(64)
+  connection String   @db.VarChar(32)
+  qr         String?  @db.Text
+  meJid      String?  @db.VarChar(100)
+  lastError  String?  @db.VarChar(500)
+  updatedAt  DateTime @updatedAt @db.DateTime(3)
+
+  @@map("sender_state")
+}
+
+/// Leases for leader election: exactly one process owns the WhatsApp socket ("sender") and one
+/// runs the scheduler at a time, no matter how many replicas are deployed.
+model Lease {
+  name      String   @id @db.VarChar(64)
+  holder    String   @db.VarChar(128)
+  expiresAt DateTime @db.DateTime(3)
+
+  @@map("leases")
+}
+
+/// Marks a scheduled job as completed for a given local day (cheap "already done today" check).
+model JobRun {
+  job         String   @db.VarChar(64)
+  runDate     DateTime @db.Date
+  completedAt DateTime @default(now()) @db.DateTime(3)
+  enqueued    Int      @default(0)
+
+  @@id([job, runDate])
+  @@map("job_runs")
+}
+
+/// Messages sent per local day — enforces DAILY_SEND_CAP across restarts.
+model SendCounter {
+  day  DateTime @id @db.Date
+  sent Int      @default(0)
+
+  @@map("send_counters")
+}
