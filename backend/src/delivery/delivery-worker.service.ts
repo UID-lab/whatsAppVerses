@@ -113,20 +113,34 @@ export class DeliveryWorkerService implements OnModuleInit {
     }
 
     let text: string;
+    let verseId: number | null = null;
     const isWelcome = d.kind === DeliveryKind.WELCOME;
     if (isWelcome) {
       // Greeting only; the first verse goes out with tomorrow's daily run.
       text = formatWelcomeMessage(sub.name, this.config.get('BRAND_NAME'));
     } else {
+      // A retried delivery keeps the verse it was given the first time.
       let verse = d.verse;
       if (!verse) {
-        verse = await this.verses.verseFor(sub);
+        verse = await this.verses.nextVerse(sub);
+        if (!verse && this.config.get('ON_VERSES_EXHAUSTED') === 'restart' && (await this.verses.poolSize(sub.verseType)) > 0) {
+          const cleared = await this.verses.clearHistory(sub.id, sub.verseType);
+          this.logger.log(`Subscriber ${sub.id} received all ${cleared} ${sub.verseType} verses; starting a new cycle`);
+          verse = await this.verses.nextVerse(sub);
+        }
         if (!verse) {
-          await this.repo.markRetry(d.id, 'No verses available (seed not run?)', 30 * 60_000, true);
+          const pool = await this.verses.poolSize(sub.verseType);
+          if (pool === 0) {
+            await this.repo.markRetry(d.id, 'No verses available (seed not run?)', 30 * 60_000, true);
+          } else {
+            this.logger.log(`Subscriber ${sub.id} has received all ${pool} ${sub.verseType} verses; nothing left to send`);
+            await this.repo.markSkipped(d.id, `All ${pool} ${sub.verseType} verses already delivered`);
+          }
           return;
         }
         await this.repo.assignVerse(d.id, verse.id);
       }
+      verseId = verse.id;
       text = formatVerseMessage(verse);
     }
 
@@ -142,6 +156,8 @@ export class DeliveryWorkerService implements OnModuleInit {
       } else if (err instanceof PermanentSendError || d.attempts >= this.config.get('MAX_DELIVERY_ATTEMPTS')) {
         this.logger.warn(`Delivery ${d.id} failed permanently: ${message}`);
         await this.repo.markFailed(d.id, sub.id, message);
+        // Never delivered, so the verse stays available for this subscriber on a later day.
+        if (verseId !== null) await this.verses.release(sub.id, verseId);
       } else {
         await this.repo.markRetry(d.id, message, retryDelayMs(d.attempts));
       }

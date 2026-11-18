@@ -13,6 +13,7 @@ const bible: Verse = {
   transliteration: null,
   translation: 'KJV',
   rotationIndex: 0,
+  rotationTier: 1,
 };
 
 const gita: Verse = {

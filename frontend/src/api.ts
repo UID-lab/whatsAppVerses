@@ -85,4 +85,5 @@ export interface AdminStats {
   dailySendCap: number;
   messagesPerMinute: number;
   rotationPool: Record<VerseType, number>;
+  repeatedVerses: number;
 }

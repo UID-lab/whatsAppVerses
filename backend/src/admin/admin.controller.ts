@@ -85,12 +85,13 @@ export class AdminController {
   @Get('stats')
   async stats() {
     const today = localDate(this.config.get('APP_TIMEZONE'));
-    const [subscribers, deliveriesToday, sentToday, bible, gita] = await Promise.all([
+    const [subscribers, deliveriesToday, sentToday, bible, gita, repeatedVerses] = await Promise.all([
       this.subscribers.countsByStatusAndType(),
       this.deliveries.statusCounts(today),
       this.outbound.sentToday(),
       this.verses.poolSize(VerseType.BIBLE),
       this.verses.poolSize(VerseType.GITA),
+      this.verses.countRepeatedDeliveries(),
     ]);
     return {
       date: toIsoDate(today),
@@ -100,6 +101,8 @@ export class AdminController {
       dailySendCap: this.config.get('DAILY_SEND_CAP'),
       messagesPerMinute: this.config.get('MESSAGES_PER_MINUTE'),
       rotationPool: { BIBLE: bible, GITA: gita },
+      /** Subscriber+verse pairs delivered more than once (within the retention window). Always 0. */
+      repeatedVerses,
     };
   }
 

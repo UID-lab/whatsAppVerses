@@ -70,6 +70,14 @@ export class EnvironmentVariables {
   @IsIn(['whatsapp_confirm', 'direct'])
   OPT_IN_MODE: 'whatsapp_confirm' | 'direct' = 'direct';
 
+  /**
+   * What happens when a subscriber has received every verse of their type:
+   * stop    — no more verses for them (a verse is never repeated). Default.
+   * restart — start a fresh cycle (verses repeat, in the same order, after the whole pool).
+   */
+  @IsIn(['stop', 'restart'])
+  ON_VERSES_EXHAUSTED: 'stop' | 'restart' = 'stop';
+
   /** Shown in the welcome message: "Thank you for subscribing to <BRAND_NAME>". */
   @IsString() @MinLength(1)
   BRAND_NAME: string = 'U!D Labs';

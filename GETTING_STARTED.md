@@ -78,8 +78,8 @@ npm run prisma:seed
 You should see:
 
 ```
-Bible (KJV): 31102 verses (31102 new), 420 in daily rotation (0 rotation updates)
-Bhagavad Gita: 701 verses (701 new), 654 in daily rotation (0 rotation updates)
+Bible (KJV): 31102 verses (31102 new), rotation: 420 curated + 10471 extended (0 rotation updates)
+Bhagavad Gita: 701 verses (701 new), rotation: 654 (ch. 2–18) + 47 (ch. 1) (0 rotation updates)
 ```
 
 (Re-running the seed is safe: it skips verses that already exist.)
@@ -193,12 +193,106 @@ Now real users can subscribe: they enter their name and number, pick a verse typ
 
 ---
 
-## 8. Run the tests (optional)
+## 8. Test the entire flow from scratch
+
+This resets the local database and checks every part of the app, in about 10 minutes.
+Run the backend in **console mode** for steps A–E (`MESSAGING_PROVIDER=console` in `backend/.env`),
+so nothing goes to real WhatsApp until step F.
+
+The examples use a shell helper for database queries. Define it once per Terminal window:
 
 ```bash
-cd ~/Desktop/verse-whatsapp/backend
-npm test
+db() { docker exec -i verses-mysql mysql -uverses -pverses verses -e "$1" 2>/dev/null; }
 ```
+
+### A. Fresh database
+
+Stop the backend (`Ctrl+C`), then:
+
+```bash
+docker rm -f verses-mysql && docker run -d --name verses-mysql -p 3307:3306 -e MYSQL_DATABASE=verses -e MYSQL_USER=verses -e MYSQL_PASSWORD=verses -e MYSQL_ROOT_PASSWORD=root mysql:8.4 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+```
+
+```bash
+until docker exec verses-mysql mysqladmin ping -h127.0.0.1 -uverses -pverses --silent 2>/dev/null; do sleep 2; done; echo "MySQL is ready"
+```
+
+```bash
+cd ~/Desktop/verse-whatsapp/backend && npm run prisma:migrate:deploy && npm run prisma:seed
+```
+
+Expect three migrations applied, and the seed lines shown in step 3.
+
+> This deletes the WhatsApp link too (it's stored in MySQL). After a reset you scan the QR code again in step F.
+
+### B. Automated tests
+
+```bash
+cd ~/Desktop/verse-whatsapp/backend && npm test
+```
+
+All tests pass.
+
+### C. Prove verses never repeat
+
+```bash
+cd ~/Desktop/verse-whatsapp/backend && npm run verify:no-repeats
+```
+
+It simulates every day for a test subscriber until each pool is empty (Gita about 2 s, Bible about 2 minutes). Every line should be ✅, ending with `✅ No-repeat guarantee verified`. It cleans up after itself.
+
+### D. Sign-up flow
+
+1. Start the backend (`npm run start:dev`) and the frontend (`npm run dev`).
+2. At http://localhost:5173 enter a name, a number and pick **Bible**. The page shows **"Thank you, <name>!"**
+   and the backend terminal prints the welcome message.
+3. Try the error cases:
+   - empty name → "Please enter your name."
+   - an invalid number → "Please enter a valid mobile number"
+   - the same number again → "This number is already subscribed"
+4. Sign up a second number with **Bhagavad Gita**.
+
+### E. Simulate several days
+
+Run this block once per simulated day. It moves existing deliveries one day into the past, runs
+"today's" job, and sends right away:
+
+```bash
+cd ~/Desktop/verse-whatsapp/backend && KEY=$(grep ^ADMIN_API_KEY .env | cut -d= -f2) && db "UPDATE deliveries SET deliveryDate = deliveryDate - INTERVAL 1 DAY; DELETE FROM job_runs;" && curl -s -X POST localhost:3000/api/admin/jobs/enqueue-today -H "x-admin-key: $KEY" && db "UPDATE deliveries SET nextAttemptAt = NOW(3) WHERE status = 'PENDING';" && echo
+```
+
+Wait about 20 seconds, then look at what each subscriber received:
+
+```bash
+db "SELECT s.name, d.deliveryDate, d.kind, d.status, v.reference FROM deliveries d JOIN subscribers s ON s.id = d.subscriberId LEFT JOIN verses v ON v.id = d.verseId ORDER BY s.id, d.deliveryDate;"
+```
+
+Expect:
+- day 1 is `WELCOME` (no verse);
+- every later day is `DAILY` + `SENT`, with a **different** reference each day;
+- the two subscribers get different verses.
+
+To double-check, this must return **no rows**:
+
+```bash
+db "SELECT subscriberId, verseId, COUNT(*) FROM deliveries WHERE verseId IS NOT NULL AND status = 'SENT' GROUP BY subscriberId, verseId HAVING COUNT(*) > 1;"
+```
+
+The admin page (http://localhost:5173/admin) shows **Repeated verses: 0**.
+
+**Opt-out:** open the "manage subscription" link from step D (or `/manage?token=…`), click
+**Unsubscribe**, run one more simulated day, and check that this subscriber's new delivery is `SKIPPED`.
+
+### F. Real WhatsApp
+
+1. Set `MESSAGING_PROVIDER=baileys` in `backend/.env` and restart the backend.
+2. Link +91 89717 75506 on `/admin` (step 7).
+3. Sign up a **different** real number. That phone receives the welcome message from 89717 75506 within seconds.
+4. Run one simulated day (block E). The phone receives its first verse.
+5. Reply **STOP** from that phone. You get the unsubscribe confirmation, and the next simulated day sends nothing.
+   Reply **START** to resume.
+
+When you're done, keep the subscribers or reset again with step A.
 
 ---
 

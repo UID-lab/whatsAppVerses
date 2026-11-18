@@ -64,7 +64,8 @@ model Subscriber {
   createdAt            DateTime         @default(now()) @db.DateTime(3)
   updatedAt            DateTime         @updatedAt @db.DateTime(3)
 
-  deliveries Delivery[]
+  deliveries     Delivery[]
+  assignedVerses SubscriberVerse[]
 
   // Keyset pagination for the daily enqueue: WHERE status='ACTIVE' AND id > ? ORDER BY id
   @@index([status, id])
@@ -89,8 +90,13 @@ model Verse {
   /// Position in the deterministic, pre-shuffled rotation. NULL = not used for daily sends
   /// (e.g. genealogies / sentence fragments).
   rotationIndex   Int?
+  /// 1 = primary pool (curated Bible verses / Gita chapters 2–18), used first.
+  /// 2 = extended pool (more stand-alone Bible verses / Gita chapter 1), used after tier 1.
+  /// Each tier occupies a contiguous rotationIndex range.
+  rotationTier    Int?      @db.TinyInt
 
   deliveries Delivery[]
+  assignedTo SubscriberVerse[]
 
   @@unique([type, book, chapter, verse])
   @@unique([type, rotationIndex])
@@ -128,6 +134,22 @@ model Delivery {
   @@index([deliveryDate, status])
   @@index([verseId])
   @@map("deliveries")
+}
+
+/// Every verse ever handed to a subscriber. The primary key makes it impossible for the same
+/// verse to be assigned to the same person twice — the no-repeat guarantee is enforced by MySQL.
+/// Never purged (unlike deliveries).
+model SubscriberVerse {
+  subscriberId Int
+  verseId      Int
+  assignedAt   DateTime @default(now()) @db.DateTime(3)
+
+  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  verse      Verse      @relation(fields: [verseId], references: [id], onDelete: Cascade)
+
+  @@id([subscriberId, verseId])
+  @@index([verseId])
+  @@map("subscriber_verses")
 }
 
 /// Baileys (WhatsApp Web multi-device) credentials and Signal keys, persisted in MySQL so the

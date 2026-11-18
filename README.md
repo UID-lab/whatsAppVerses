@@ -70,15 +70,29 @@ jurisdictions. Swapping in another public-domain translation means changing one 
 
 ### How each day's verse is chosen
 
-1. The seed gives every eligible verse a `rotationIndex` (0…N-1) in a fixed, seeded shuffle:
-   - **Bible:** 420 well-known devotional verses from
-     [`bible-daily-refs.txt`](backend/prisma/data/bible-daily-refs.txt). Random KJV verses are
-     mostly genealogies and sentence fragments. Edit the file and re-seed to change the list.
-   - **Gita:** 654 verses from chapters 2–18 (chapter 1 is mostly the roll-call of the armies).
-2. Each subscriber gets a random `rotationOffset` at sign-up and a `progress` counter.
-3. Today's verse = `rotation[(rotationOffset + progress) mod N]`, an O(1) lookup on a unique index.
-   `progress` only increases after a verse is **delivered**, so a failed day never skips a verse.
-   There are no repeats for N days (~14 months for the Bible, ~21 months for the Gita), and then the cycle repeats.
+1. The seed orders verses into two tiers, each a fixed, seeded shuffle:
+
+   | | Tier 1 (sent first) | Tier 2 (after tier 1 is used up) | Total |
+   |---|---|---|---|
+   | **Bible** | 420 well-known verses from [`bible-daily-refs.txt`](backend/prisma/data/bible-daily-refs.txt) | 10,471 more verses that read well on their own (full sentences; no genealogies or mid-story fragments) | 10,891 ≈ **29.8 years** |
+   | **Gita** | 654 verses, chapters 2–18 | 47 verses of chapter 1 | all 701 ≈ **1.9 years** |
+
+2. Each subscriber starts at a random point in each tier (`rotationOffset`) and walks forward, so
+   different people get different verses on the same day.
+3. **No verse is ever repeated for a subscriber.** Every verse handed to someone is recorded in
+   `subscriber_verses` with `PRIMARY KEY (subscriberId, verseId)`. Selection skips recorded verses,
+   and the record is written atomically *before* sending, so the database itself refuses a repeat:
+   - retries of a failed send reuse the same delivery and the same verse (it's one message, not two);
+   - after a crash mid-send the verse stays recorded, so it is skipped rather than sent again;
+   - switching between Bible and Gita, or unsubscribing and resubscribing, keeps the history;
+   - the history is never purged (unlike delivery rows).
+   If a send fails permanently, the verse is released, so it can still be delivered on a later day.
+4. When a subscriber has received **every** verse of their type, they stop receiving verses
+   (`ON_VERSES_EXHAUSTED=stop`, the default) rather than seeing a repeat. For the Gita that is after
+   about 23 months. Set `ON_VERSES_EXHAUSTED=restart` to begin a new cycle instead.
+5. Check it yourself: `npm run verify:no-repeats` simulates every day for a test subscriber
+   until the pool is empty and checks for duplicates. The admin page also shows
+   **Repeated verses: 0**, an audit across all deliveries.
 
 ---
 

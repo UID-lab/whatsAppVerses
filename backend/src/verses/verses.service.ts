@@ -1,47 +1,91 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Verse, VerseType } from '@prisma/client';
 import { randomInt } from 'node:crypto';
-import { VersesRepository } from './verses.repository';
+import { TierRange, VersesRepository } from './verses.repository';
 
-const POOL_CACHE_MS = 10 * 60_000;
+const TIER_CACHE_MS = 10 * 60_000;
+// A failed reservation means a concurrent call for the same subscriber just won that verse, so
+// failures are bounded by the number of simultaneous calls (in practice: one sender, one per day).
+const MAX_RESERVE_ATTEMPTS = 100;
+
+type SubscriberRef = { id: number; verseType: VerseType; rotationOffset: number; progress: number };
 
 /**
- * Verse selection — "sequential progression through a shuffled rotation, per subscriber":
+ * Verse selection with a hard no-repeat guarantee.
  *
- *  - The seed assigns every eligible verse a rotationIndex 0..N-1 in a fixed, pre-shuffled order.
- *  - Each subscriber gets a random rotationOffset at sign-up and a progress counter that only
- *    increases when a verse is actually delivered.
- *  - Today's verse = rotation[(rotationOffset + progress) mod N].
- *
- * So nobody sees a repeat until they've received all N verses (420 Bible / 654 Gita ≈ 1-2 years),
- * a failed or skipped day never skips a verse, and different subscribers receive different text
- * on the same day (thousands of byte-identical messages are a classic spam signal).
+ *  - The seed orders verses into tiers: tier 1 (420 curated Bible verses / Gita chapters 2–18)
+ *    then tier 2 (~10,000 more stand-alone Bible verses / Gita chapter 1), each a fixed shuffle.
+ *  - Each subscriber starts at a random point (rotationOffset) inside each tier and walks forward,
+ *    so different people get different verses on the same day.
+ *  - Every verse handed out is recorded in subscriber_verses (PRIMARY KEY subscriberId+verseId).
+ *    Selection skips recorded verses and the insert is atomic, so MySQL itself refuses a repeat.
+ *  - When every verse of the type has been given, nextVerse() returns null: by default the
+ *    subscriber simply stops receiving verses (ON_VERSES_EXHAUSTED=stop) rather than seeing a repeat.
  */
 @Injectable()
 export class VersesService {
   private readonly logger = new Logger(VersesService.name);
-  private readonly poolSizes = new Map<VerseType, { size: number; at: number }>();
+  private readonly tiers = new Map<VerseType, { ranges: TierRange[]; at: number }>();
 
   constructor(private readonly repo: VersesRepository) {}
 
+  async tierRanges(type: VerseType): Promise<TierRange[]> {
+    const cached = this.tiers.get(type);
+    if (cached && Date.now() - cached.at < TIER_CACHE_MS) return cached.ranges;
+    const ranges = await this.repo.tierRanges(type);
+    this.tiers.set(type, { ranges, at: Date.now() });
+    if (ranges.length === 0) this.logger.error(`No ${type} verses in rotation — did you run the seed?`);
+    return ranges;
+  }
+
   async poolSize(type: VerseType): Promise<number> {
-    const cached = this.poolSizes.get(type);
-    if (cached && Date.now() - cached.at < POOL_CACHE_MS) return cached.size;
-    const size = await this.repo.countRotation(type);
-    this.poolSizes.set(type, { size, at: Date.now() });
-    if (size === 0) this.logger.error(`No ${type} verses in rotation — did you run the seed?`);
-    return size;
+    return (await this.tierRanges(type)).reduce((sum, t) => sum + t.size, 0);
   }
 
+  /** Random start position for a new subscriber (applied modulo each tier's size). */
   async randomOffset(type: VerseType): Promise<number> {
-    const size = await this.poolSize(type);
-    return size > 0 ? randomInt(size) : 0;
+    const first = (await this.tierRanges(type))[0];
+    return first && first.size > 0 ? randomInt(first.size) : 0;
   }
 
-  async verseFor(sub: { verseType: VerseType; rotationOffset: number; progress: number }): Promise<Verse | null> {
-    const size = await this.poolSize(sub.verseType);
-    if (size === 0) return null;
-    const index = (((sub.rotationOffset + sub.progress) % size) + size) % size;
-    return this.repo.findByRotationIndex(sub.verseType, index);
+  /**
+   * Picks and reserves the next verse this subscriber has never received.
+   * Returns null when they have received every verse of their type.
+   */
+  async nextVerse(sub: SubscriberRef): Promise<Verse | null> {
+    for (let attempt = 0; attempt < MAX_RESERVE_ATTEMPTS; attempt++) {
+      const candidate = await this.findNextUnassigned(sub);
+      if (!candidate) return null;
+      if (await this.repo.reserve(sub.id, candidate.id)) return candidate;
+    }
+    throw new Error(`Could not reserve a verse for subscriber ${sub.id}`);
+  }
+
+  release(subscriberId: number, verseId: number): Promise<void> {
+    return this.repo.release(subscriberId, verseId);
+  }
+
+  clearHistory(subscriberId: number, type: VerseType): Promise<number> {
+    return this.repo.clearHistory(subscriberId, type);
+  }
+
+  countRepeatedDeliveries(): Promise<number> {
+    return this.repo.countRepeatedDeliveries();
+  }
+
+  private async findNextUnassigned(sub: SubscriberRef): Promise<Verse | null> {
+    for (const t of await this.tierRanges(sub.verseType)) {
+      if (t.size === 0) continue;
+      // Start the scan where the next unsent verse most likely is (offset + progress). This is
+      // only a speed hint: correctness comes from the NOT EXISTS check, so the wrap-around
+      // second query still finds any verse that was skipped.
+      const hint = t.start + ((((sub.rotationOffset + sub.progress) % t.size) + t.size) % t.size);
+      const end = t.start + t.size;
+      const verse =
+        (await this.repo.findFirstUnassigned(sub.verseType, sub.id, hint, end)) ??
+        (await this.repo.findFirstUnassigned(sub.verseType, sub.id, t.start, hint));
+      if (verse) return verse;
+    }
+    return null;
   }
 }

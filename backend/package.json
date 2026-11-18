@@ -18,7 +18,8 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
-    "datasets:build": "node scripts/build-datasets.mjs"
+    "datasets:build": "node scripts/build-datasets.mjs",
+    "verify:no-repeats": "tsx scripts/verify-no-repeats.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

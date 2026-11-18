@@ -57,48 +57,73 @@ function loadDailyRefs(): string[] {
     .filter((l) => l && !l.startsWith('#'));
 }
 
-type Row = Omit<Prisma.VerseCreateManyInput, 'rotationIndex'>;
+type Row = Omit<Prisma.VerseCreateManyInput, 'rotationIndex' | 'rotationTier'>;
+type Slot = { index: number; tier: number };
 
-/** Inserts missing verses, then makes rotationIndex match the desired order. */
-async function seedType(type: VerseType, rows: Row[], eligible: number[], seed: number) {
-  const order = shuffledIndexes(eligible.length, seed);
-  const desired = new Map<string, number>(); // "book|chapter|verse" -> rotationIndex
-  order.forEach((pos, rotationIndex) => {
-    const r = rows[eligible[pos]];
-    desired.set(`${r.book}|${r.chapter}|${r.verse}`, rotationIndex);
-  });
+/**
+ * Inserts missing verses, then makes rotationIndex/rotationTier match the desired order.
+ * `tiers` are lists of row indexes; tier 1 gets rotationIndex 0..n1-1, tier 2 continues after it,
+ * each tier in its own seeded shuffle. Subscribers exhaust tier 1 before reaching tier 2.
+ */
+async function seedType(type: VerseType, rows: Row[], tiers: number[][], seed: number) {
   const keyOf = (r: { book: string; chapter: number; verse: number }) => `${r.book}|${r.chapter}|${r.verse}`;
+  const desired = new Map<string, Slot>();
+  let next = 0;
+  tiers.forEach((eligible, t) => {
+    shuffledIndexes(eligible.length, seed + t * 7919).forEach((pos) => {
+      desired.set(keyOf(rows[eligible[pos]]), { index: next++, tier: t + 1 });
+    });
+  });
 
   let inserted = 0;
   for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
-    const chunk = rows.slice(i, i + INSERT_CHUNK).map((r) => ({ ...r, rotationIndex: desired.get(keyOf(r)) ?? null }));
+    const chunk = rows.slice(i, i + INSERT_CHUNK).map((r) => {
+      const slot = desired.get(keyOf(r));
+      return { ...r, rotationIndex: slot?.index ?? null, rotationTier: slot?.tier ?? null };
+    });
     inserted += (await prisma.verse.createMany({ data: chunk, skipDuplicates: true })).count;
   }
 
-  // Existing databases: fix the rotation only if it differs (e.g. bible-daily-refs.txt was edited).
+  // Existing databases: rewrite the rotation only if it differs (e.g. bible-daily-refs.txt edited).
   const current = await prisma.verse.findMany({
     where: { type },
-    select: { id: true, book: true, chapter: true, verse: true, rotationIndex: true },
+    select: { id: true, book: true, chapter: true, verse: true, rotationIndex: true, rotationTier: true },
   });
-  const changes = current.filter((v) => (desired.get(keyOf(v)) ?? null) !== v.rotationIndex);
+  const changes = current.filter((v) => {
+    const slot = desired.get(keyOf(v));
+    return (slot?.index ?? null) !== v.rotationIndex || (slot?.tier ?? null) !== v.rotationTier;
+  });
   if (changes.length > 0) {
     await prisma.$transaction(
       async (tx) => {
-        await tx.verse.updateMany({ where: { type }, data: { rotationIndex: null } });
+        await tx.verse.updateMany({ where: { type }, data: { rotationIndex: null, rotationTier: null } });
         const targets = current.filter((v) => desired.has(keyOf(v)));
         for (let i = 0; i < targets.length; i += 500) {
           const batch = targets.slice(i, i + 500);
-          const cases = Prisma.join(
-            batch.map((v) => Prisma.sql`WHEN ${v.id} THEN ${desired.get(keyOf(v))}`),
-            ' ',
-          );
-          await tx.$executeRaw`UPDATE verses SET rotationIndex = CASE id ${cases} END WHERE id IN (${Prisma.join(batch.map((v) => v.id))})`;
+          const ids = Prisma.join(batch.map((v) => v.id));
+          const idx = Prisma.join(batch.map((v) => Prisma.sql`WHEN ${v.id} THEN ${desired.get(keyOf(v))!.index}`), ' ');
+          const tier = Prisma.join(batch.map((v) => Prisma.sql`WHEN ${v.id} THEN ${desired.get(keyOf(v))!.tier}`), ' ');
+          await tx.$executeRaw`UPDATE verses SET rotationIndex = CASE id ${idx} END, rotationTier = CASE id ${tier} END WHERE id IN (${ids})`;
         }
       },
-      { timeout: 300_000 },
+      { timeout: 600_000 },
     );
   }
-  return { inserted, rotation: desired.size, rotationChanged: changes.length };
+  return { inserted, tierSizes: tiers.map((t) => t.length), rotationChanged: changes.length };
+}
+
+/**
+ * Extended Bible pool (tier 2): verses that read well on their own, chosen by a heuristic —
+ * a full sentence of reasonable length, not a genealogy/census list, not a mid-story fragment.
+ */
+const LIST_HEAVY_BOOKS = new Set(['Numbers', '1 Chronicles', 'Leviticus']);
+function isStandAloneBibleVerse(r: BibleRow): boolean {
+  const len = r.t.length;
+  if (len < 60 || len > 320) return false;
+  if (LIST_HEAVY_BOOKS.has(r.b)) return false;
+  if (/^(And|But|Then|Now|So|Or|Nor|Because|That|Which|Who|Whom|Unto)\b/.test(r.t)) return false;
+  if (/(begat|son of|sons of)\b/i.test(r.t)) return false;
+  return /[.!?]["')’]?$/.test(r.t);
 }
 
 async function seedBible() {
@@ -107,7 +132,9 @@ async function seedBible() {
   const refs = [...new Set(loadDailyRefs())];
   const missing = refs.filter((ref) => !indexByRef.has(ref));
   if (missing.length) console.warn(`Unknown references in bible-daily-refs.txt (skipped): ${missing.join(', ')}`);
-  const eligible = refs.filter((ref) => indexByRef.has(ref)).map((ref) => indexByRef.get(ref) as number);
+  const curated = refs.filter((ref) => indexByRef.has(ref)).map((ref) => indexByRef.get(ref) as number);
+  const curatedSet = new Set(curated);
+  const extended = data.map((r, i) => (!curatedSet.has(i) && isStandAloneBibleVerse(r) ? i : -1)).filter((i) => i >= 0);
 
   const rows: Row[] = data.map((r) => ({
     type: VerseType.BIBLE,
@@ -118,14 +145,17 @@ async function seedBible() {
     text: r.t,
     translation: 'KJV',
   }));
-  const res = await seedType(VerseType.BIBLE, rows, eligible, ROTATION_SEED);
-  console.log(`Bible (KJV): ${rows.length} verses (${res.inserted} new), ${res.rotation} in daily rotation (${res.rotationChanged} rotation updates)`);
+  const res = await seedType(VerseType.BIBLE, rows, [curated, extended], ROTATION_SEED);
+  console.log(
+    `Bible (KJV): ${rows.length} verses (${res.inserted} new), rotation: ${res.tierSizes[0]} curated + ${res.tierSizes[1]} extended (${res.rotationChanged} rotation updates)`,
+  );
 }
 
 async function seedGita() {
   const data = load<GitaRow>('gita.json.gz').filter((r) => r.en);
-  // Chapter 1 is mostly the roll-call of both armies, so the rotation pool starts at chapter 2.
-  const eligible = data.map((r, i) => (r.c >= 2 ? i : -1)).filter((i) => i >= 0);
+  // Chapters 2–18 first; chapter 1 (mostly the roll-call of the armies) comes last.
+  const primary = data.map((r, i) => (r.c >= 2 ? i : -1)).filter((i) => i >= 0);
+  const chapterOne = data.map((r, i) => (r.c === 1 ? i : -1)).filter((i) => i >= 0);
   const rows: Row[] = data.map((r) => ({
     type: VerseType.GITA,
     reference: `Bhagavad Gita ${r.c}.${r.v}`,
@@ -137,8 +167,10 @@ async function seedGita() {
     transliteration: r.tr,
     translation: 'Shri Purohit Swami',
   }));
-  const res = await seedType(VerseType.GITA, rows, eligible, ROTATION_SEED + 1);
-  console.log(`Bhagavad Gita: ${rows.length} verses (${res.inserted} new), ${res.rotation} in daily rotation (${res.rotationChanged} rotation updates)`);
+  const res = await seedType(VerseType.GITA, rows, [primary, chapterOne], ROTATION_SEED + 1);
+  console.log(
+    `Bhagavad Gita: ${rows.length} verses (${res.inserted} new), rotation: ${res.tierSizes[0]} (ch. 2–18) + ${res.tierSizes[1]} (ch. 1) (${res.rotationChanged} rotation updates)`,
+  );
 }
 
 async function main() {

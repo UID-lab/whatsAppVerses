@@ -134,6 +134,10 @@ export function AdminPage() {
           <p>
             Sent {stats.sentToday} / {stats.dailySendCap} (cap) · pace {stats.messagesPerMinute}/min
           </p>
+          <p>
+            Verse pool: {stats.rotationPool.BIBLE} Bible · {stats.rotationPool.GITA} Gita · Repeated verses:{' '}
+            <span className={`badge badge-${stats.repeatedVerses === 0 ? 'active' : 'pending'}`}>{stats.repeatedVerses}</span>
+          </p>
           <table className="table">
             <tbody>
               {Object.entries(stats.deliveriesToday).map(([status, n]) => (
