@@ -69,7 +69,7 @@ export function SubscribePage() {
       <Progress step={step} withConfirm={options?.optInMode === 'whatsapp_confirm'} />
       {step === 'phone' && (
         <form onSubmit={submitPhone} noValidate>
-          <h1>A verse for your morning, on WhatsApp</h1>
+          <h1>A verse for you every Morning </h1>
           <p className="lead">
             Get one Bible or Bhagavad Gita verse every day{options ? ` at ${options.sendTime}` : ''}. Free, no app, unsubscribe anytime.
           </p>
@@ -78,7 +78,7 @@ export function SubscribePage() {
             id="name"
             type="text"
             autoComplete="given-name"
-            placeholder="e.g. Priya"
+            placeholder="Eg : Mary  "
             maxLength={60}
             value={name}
             onChange={(e) => (setName(e.target.value), setError(undefined))}
