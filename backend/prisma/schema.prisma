@@ -124,8 +124,9 @@ model Delivery {
   subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
   verse      Verse?     @relation(fields: [verseId], references: [id], onDelete: SetNull)
 
-  /// Idempotency: at most one message per subscriber per day, however many times the cron runs.
-  @@unique([subscriberId, deliveryDate])
+  /// Idempotency: at most one welcome and one daily verse per subscriber per day, however many
+  /// times the cron runs.
+  @@unique([subscriberId, deliveryDate, kind])
   /// Queue claim: WHERE status='PENDING' AND nextAttemptAt <= NOW() ORDER BY nextAttemptAt
   @@index([status, nextAttemptAt])
   /// Reaper: WHERE status IN ('PROCESSING','SENDING') AND lockedUntil < NOW()

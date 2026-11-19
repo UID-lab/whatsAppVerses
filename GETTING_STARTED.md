@@ -123,17 +123,26 @@ npm run dev
    ```
    Hi <name>,
 
-   Thank you for subscribing to U!D Labs. Your verses will start from tomorrow morning.
+   Thank you for subscribing to U!D Labs. Your first verse will arrive today at 9:30 PM.
 
    Let's hold hands and begin the path with joy!
 
    Reply STOP anytime to unsubscribe.
    ```
 
-3. From the next morning, a verse is sent every day at `DAILY_SEND_TIME` (see below).
+   The first-verse line depends on when they sign up (`DAILY_SEND_TIME` = 21:30 here):
 
-To send today's verses right away for testing (subscribers who got the welcome message today
-are skipped until tomorrow):
+   | Signed up | Welcome says | First verse |
+   |---|---|---|
+   | before the send time | "…arrive **today at 9:30 PM**" | in tonight's scheduled run |
+   | after the send time, before `SEND_WINDOW_END` | "…arrive **in a few minutes**" | about 30 seconds after the welcome |
+   | after `SEND_WINDOW_END` | "…arrive **tomorrow at 9:30 PM**" | tomorrow's run |
+
+   So everyone gets a verse on the day they sign up, unless they sign up after the send window closes.
+
+3. After that, a verse is sent every day at `DAILY_SEND_TIME` (see below).
+
+To send today's verses right away for testing (anyone who already got today's verse is skipped):
 
 ```bash
 curl -X POST localhost:3000/api/admin/jobs/enqueue-today -H "x-admin-key: YOUR_ADMIN_KEY"
@@ -185,7 +194,7 @@ reply and goes out at any time of day.
    (Or click **Get pairing code** and choose *Link with phone number instead* on the phone.)
 5. The status changes to **open**. The link is stored in MySQL, so restarting doesn't require scanning again.
 
-Now real users can subscribe: they enter their name and number, pick a verse type, and get the welcome message from +91 89717 75506 within seconds. Verses follow every morning.
+Now real users can subscribe: they enter their name and number, pick a verse type, and get the welcome message from +91 89717 75506 within seconds. Verses follow every day at the send time.
 
 > Test with a **different** number from 89717 75506. A number can't message itself.
 
@@ -268,8 +277,8 @@ db "SELECT s.name, d.deliveryDate, d.kind, d.status, v.reference FROM deliveries
 ```
 
 Expect:
-- day 1 is `WELCOME` (no verse);
-- every later day is `DAILY` + `SENT`, with a **different** reference each day;
+- the sign-up day has a `WELCOME` row and usually a `DAILY` verse too;
+- every day has one `DAILY` + `SENT` row, with a **different** reference each day;
 - the two subscribers get different verses.
 
 To double-check, this must return **no rows**:

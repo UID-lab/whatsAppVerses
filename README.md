@@ -1,7 +1,7 @@
 # Daily Verse on WhatsApp
 
 People enter their name and number on a React page, choose **Bible** or **Bhagavad Gita** verses,
-get a personal welcome message right away, and then one verse every morning on WhatsApp from
+get a personal welcome message right away, and then one verse every day (from the first day) on WhatsApp from
 **+91 89717 75506**. It's all free, self-hosted software: NestJS + Prisma +
 MySQL, with no per-message API costs.
 
@@ -103,7 +103,7 @@ jurisdictions. Swapping in another public-domain translation means changing one 
 | Cron must not send inline | The cron only **enqueues** rows in `deliveries`. A separate worker sends them |
 | Large subscriber counts | Keyset pagination over `subscribers (status, id)` with `createMany` batches of 1,000. **50,000 subscribers enqueue in ~3 s** (measured on MariaDB) |
 | Queue without Redis | MySQL table with `SELECT … FOR UPDATE SKIP LOCKED`. Free Redis tiers (e.g. Upstash) cap commands per month, and BullMQ's polling burns through that quota. That would be the step that forces a paid upgrade, so it's avoided |
-| No duplicates | `UNIQUE(subscriberId, deliveryDate)` makes enqueue idempotent (cron re-runs, catch-up after downtime, several replicas). Rows go `PROCESSING → SENDING → SENT`. If a process dies **during** a send, the row becomes `UNKNOWN` and is **never retried**: a rare missed day rather than a duplicate |
+| No duplicates | `UNIQUE(subscriberId, deliveryDate, kind)` (at most one welcome and one daily verse per person per day) makes enqueue idempotent (cron re-runs, catch-up after downtime, several replicas). Rows go `PROCESSING → SENDING → SENT`. If a process dies **during** a send, the row becomes `UNKNOWN` and is **never retried**: a rare missed day rather than a duplicate |
 | Retries | Transient errors → `PENDING` with exponential backoff and jitter (30 s → 1 h), up to `MAX_DELIVERY_ATTEMPTS`. Permanent errors (number not on WhatsApp) → `FAILED` |
 | Crash recovery | Claims carry `lockedBy/lockedUntil`. A reaper re-queues abandoned claims every minute, and graceful shutdown hands claims back immediately |
 | Missed cron | The daily job checks every 5 min ("is it past 07:00 and not done today?"), so a restart at 07:00 doesn't skip a day |

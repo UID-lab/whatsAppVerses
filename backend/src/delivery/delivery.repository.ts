@@ -54,38 +54,45 @@ export class DeliveryRepository {
   }
 
   /**
-   * Queue the welcome greeting for today. It takes today's slot, so the first verse arrives
-   * tomorrow morning. If a daily delivery already exists for today and hasn't gone out, it is
-   * converted into the welcome message (still one message per day).
-   * Returns false when something was already sent today.
+   * Queue the welcome greeting for today. It is independent of the daily verse, so a subscriber
+   * can get both on the day they sign up. Returns false if a welcome was already sent today.
    */
   async scheduleWelcome(subscriberId: number, date: Date): Promise<boolean> {
+    return this.scheduleNow(subscriberId, date, DeliveryKind.WELCOME, 0);
+  }
+
+  /**
+   * Queue today's daily verse right away (for someone who subscribes after today's scheduled run).
+   * `delayMs` lets the welcome go out first. No-op if today's verse already exists or went out.
+   */
+  async scheduleDailyNow(subscriberId: number, date: Date, delayMs: number): Promise<boolean> {
+    return this.scheduleNow(subscriberId, date, DeliveryKind.DAILY, delayMs);
+  }
+
+  private async scheduleNow(subscriberId: number, date: Date, kind: DeliveryKind, delayMs: number): Promise<boolean> {
     const existing = await this.prisma.delivery.findUnique({
-      where: { subscriberId_deliveryDate: { subscriberId, deliveryDate: date } },
+      where: { subscriberId_deliveryDate_kind: { subscriberId, deliveryDate: date, kind } },
     });
-    const welcome = {
-      kind: DeliveryKind.WELCOME,
+    const fresh = {
       status: DeliveryStatus.PENDING,
       attempts: 0,
-      verseId: null,
-      nextAttemptAt: new Date(),
+      nextAttemptAt: new Date(Date.now() + delayMs),
       lastError: null,
     };
     if (!existing) {
       try {
-        await this.prisma.delivery.create({ data: { subscriberId, deliveryDate: date, ...welcome } });
+        await this.prisma.delivery.create({ data: { subscriberId, deliveryDate: date, kind, ...fresh } });
         return true;
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return false;
         throw err;
       }
     }
-    const resettable: DeliveryStatus[] = ['PENDING', 'SKIPPED', 'EXPIRED', 'FAILED'];
-    if (!resettable.includes(existing.status)) return false;
-    const res = await this.prisma.delivery.updateMany({
-      where: { id: existing.id, status: existing.status },
-      data: welcome,
-    });
+    // Re-queue only if nothing went out (e.g. skipped because they had unsubscribed earlier today).
+    // A verse already assigned stays assigned, so the no-repeat guarantee is untouched.
+    const resettable: DeliveryStatus[] = ['SKIPPED', 'EXPIRED', 'FAILED'];
+    if (!resettable.includes(existing.status)) return existing.status === DeliveryStatus.PENDING;
+    const res = await this.prisma.delivery.updateMany({ where: { id: existing.id, status: existing.status }, data: fresh });
     return res.count === 1;
   }
 

@@ -5,13 +5,16 @@ import { Verse, VerseType } from '@prisma/client';
  * WhatsApp formatting: *bold*, _italic_.
  */
 
-/** First message after sign-up. Verses start the next morning. */
-export function formatWelcomeMessage(name: string, brandName: string): string {
+/**
+ * First message after sign-up. `firstVerse` says when the first verse arrives, e.g.
+ * "today at 9:30 PM", "in a few minutes" or "tomorrow at 9:30 PM".
+ */
+export function formatWelcomeMessage(name: string, brandName: string, firstVerse: string): string {
   const greeting = name.trim() ? `Hi ${name.trim()},` : 'Hi,';
   return [
     greeting,
     '',
-    `Thank you for subscribing to ${brandName}. Your verses will start from tomorrow morning.`,
+    `Thank you for subscribing to ${brandName}. Your first verse will arrive ${firstVerse}.`,
     '',
     "Let's hold hands and begin the path with joy!",
     '',

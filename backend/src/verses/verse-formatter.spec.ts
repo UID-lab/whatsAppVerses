@@ -30,12 +30,12 @@ const gita: Verse = {
 };
 
 describe('formatWelcomeMessage', () => {
-  it('greets by name and says verses start tomorrow', () => {
-    expect(formatWelcomeMessage('Priya', 'U!D Labs')).toBe(
+  it('greets by name and says when the first verse arrives', () => {
+    expect(formatWelcomeMessage('Priya', 'U!D Labs', 'today at 9:30 PM')).toBe(
       [
         'Hi Priya,',
         '',
-        'Thank you for subscribing to U!D Labs. Your verses will start from tomorrow morning.',
+        'Thank you for subscribing to U!D Labs. Your first verse will arrive today at 9:30 PM.',
         '',
         "Let's hold hands and begin the path with joy!",
         '',
@@ -45,7 +45,7 @@ describe('formatWelcomeMessage', () => {
   });
 
   it('falls back gracefully without a name', () => {
-    expect(formatWelcomeMessage('', 'U!D Labs').startsWith('Hi,\n')).toBe(true);
+    expect(formatWelcomeMessage('', 'U!D Labs', 'in a few minutes').startsWith('Hi,\n')).toBe(true);
   });
 });
 

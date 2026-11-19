@@ -4,7 +4,7 @@ import type { CountryCode } from 'libphonenumber-js';
 import { randomBytes, randomInt } from 'node:crypto';
 import { AppConfigService } from '../config/app-config.service';
 import { maskPhone, normalizePhone } from '../common/phone/phone.util';
-import { localDate } from '../common/time/time.util';
+import { firstVerseTiming, localDate } from '../common/time/time.util';
 import { DeliveryRepository } from '../delivery/delivery.repository';
 import { DeliveryWorkerService } from '../delivery/delivery-worker.service';
 import { VersesService } from '../verses/verses.service';
@@ -16,6 +16,9 @@ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
 const CODE_LENGTH = 6;
 
 export const confirmMessage = (code: string) => `JOIN ${code}`;
+
+/** Gap between the welcome message and a same-day first verse, so they arrive in that order. */
+const FIRST_VERSE_DELAY_MS = 30_000;
 
 @Injectable()
 export class SubscribersService {
@@ -130,9 +133,24 @@ export class SubscribersService {
 
   // ---- helpers --------------------------------------------------------------------------------
 
+  /**
+   * Welcome message now, plus the first verse on day one:
+   *  - signed up before today's send time → today's scheduled run includes them;
+   *  - after the send time but inside the send window → verse queued right after the welcome;
+   *  - after the window closed → first verse with tomorrow's run.
+   */
   private async queueWelcome(subscriberId: number): Promise<boolean> {
-    const queued = await this.deliveries.scheduleWelcome(subscriberId, localDate(this.config.get('APP_TIMEZONE')));
-    if (queued) this.worker.wake();
+    const tz = this.config.get('APP_TIMEZONE');
+    const today = localDate(tz);
+    const queued = await this.deliveries.scheduleWelcome(subscriberId, today);
+    const timing = firstVerseTiming(
+      tz,
+      this.config.get('DAILY_SEND_TIME'),
+      this.config.get('SEND_WINDOW_START'),
+      this.config.get('SEND_WINDOW_END'),
+    );
+    if (timing === 'now') await this.deliveries.scheduleDailyNow(subscriberId, today, FIRST_VERSE_DELAY_MS);
+    if (queued || timing === 'now') this.worker.wake();
     return queued;
   }
 

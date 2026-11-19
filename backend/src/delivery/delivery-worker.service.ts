@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DeliveryKind, SubscriberStatus } from '@prisma/client';
 import { AppConfigService } from '../config/app-config.service';
-import { isWithinWindow, sleep } from '../common/time/time.util';
+import { firstVerseTiming, formatClockTime, isWithinWindow, sleep } from '../common/time/time.util';
 import { PermanentSendError } from '../messaging/messaging.types';
 import { DailyCapReachedError, OutboundService } from '../messaging/outbound.service';
 import { SenderLeadershipService } from '../messaging/sender-leadership.service';
@@ -105,6 +105,26 @@ export class DeliveryWorkerService implements OnModuleInit {
     }
   }
 
+  /** Wording for the welcome message, matching what SubscribersService scheduled. */
+  private firstVerseText(): string {
+    const at = formatClockTime(this.config.get('DAILY_SEND_TIME'));
+    switch (
+      firstVerseTiming(
+        this.config.get('APP_TIMEZONE'),
+        this.config.get('DAILY_SEND_TIME'),
+        this.config.get('SEND_WINDOW_START'),
+        this.config.get('SEND_WINDOW_END'),
+      )
+    ) {
+      case 'today':
+        return `today at ${at}`;
+      case 'now':
+        return 'in a few minutes';
+      default:
+        return `tomorrow at ${at}`;
+    }
+  }
+
   private async process(d: ClaimedDelivery): Promise<void> {
     const sub = d.subscriber;
     if (sub.status !== SubscriberStatus.ACTIVE) {
@@ -117,7 +137,7 @@ export class DeliveryWorkerService implements OnModuleInit {
     const isWelcome = d.kind === DeliveryKind.WELCOME;
     if (isWelcome) {
       // Greeting only; the first verse goes out with tomorrow's daily run.
-      text = formatWelcomeMessage(sub.name, this.config.get('BRAND_NAME'));
+      text = formatWelcomeMessage(sub.name, this.config.get('BRAND_NAME'), this.firstVerseText());
     } else {
       // A retried delivery keeps the verse it was given the first time.
       let verse = d.verse;

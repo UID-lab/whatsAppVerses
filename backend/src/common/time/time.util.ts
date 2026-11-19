@@ -65,3 +65,30 @@ export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 export function jitter(base: number, spread = 0.3): number {
   return Math.round(base * (1 - spread + Math.random() * 2 * spread));
 }
+
+/** "21:30" -> "9:30 PM", "07:05" -> "7:05 AM". */
+export function formatClockTime(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  const suffix = h < 12 ? 'AM' : 'PM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${suffix}`;
+}
+
+export type FirstVerseTiming = 'today' | 'now' | 'tomorrow';
+
+/**
+ * When someone who subscribes at `at` gets their first daily verse:
+ *  - today    — before today's send time: they're included in today's scheduled run;
+ *  - now      — after the send time but inside the send window: sent right after the welcome;
+ *  - tomorrow — after the send window has closed for the day.
+ */
+export function firstVerseTiming(
+  timeZone: string,
+  sendTime: string,
+  windowStart: string,
+  windowEnd: string,
+  at: Date = new Date(),
+): FirstVerseTiming {
+  if (localMinutesNow(timeZone, at) < minutesOfDay(sendTime)) return 'today';
+  return isWithinWindow(timeZone, windowStart, windowEnd, at) ? 'now' : 'tomorrow';
+}
