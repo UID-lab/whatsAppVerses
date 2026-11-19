@@ -1,5 +1,6 @@
 /**
- * Seeds the `verses` table from the bundled, public-domain datasets in prisma/data/.
+ * Seeds the MySQL `verses` table from the bundled, openly licensed datasets in prisma/data/.
+ * After seeding, verses live only in the database — the app never reads the data files.
  * No network access is needed at seed time or at runtime.
  *
  *   npx prisma db seed        (or: npm run prisma:seed)
@@ -14,6 +15,7 @@ import { gunzipSync } from 'node:zlib';
 
 type BibleRow = { b: string; c: number; v: number; t: string };
 type GitaRow = { c: number; v: number; sa: string; tr: string; en: string | null };
+type QuranRow = { s: number; n: string; v: number; ar: string; en: string };
 
 const DATA_DIR = join(__dirname, 'data');
 const ROTATION_SEED = 0x5eed_2026;
@@ -50,8 +52,8 @@ function shuffledIndexes(n: number, seed: number): number[] {
  * fragments, so the daily rotation uses a curated list of well-known devotional verses
  * (prisma/data/bible-daily-refs.txt). All 31,102 verses are still stored.
  */
-function loadDailyRefs(): string[] {
-  return readFileSync(join(DATA_DIR, 'bible-daily-refs.txt'), 'utf8')
+function loadDailyRefs(file = 'bible-daily-refs.txt'): string[] {
+  return readFileSync(join(DATA_DIR, file), 'utf8')
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('#'));
@@ -173,9 +175,53 @@ async function seedGita() {
   );
 }
 
+/**
+ * Extended Quran pool (tier 2): ayahs that read as a complete thought on their own AND are about
+ * universal devotional themes. Ayahs about punishment, warfare, legal rulings or specific
+ * communities are left out: out of context, as a lone daily message, they can easily mislead.
+ */
+const QURAN_GOOD_THEMES =
+  /\b(merc|forgiv|patien|steadfast|grateful|thank|prayer|worship|remembrance|remember|guidance|guide|light|peace|kind|good|righteous|charity|alms|trust|hope|knowledge|wisdom|heart|soul|believ|praise|glorif|reward|paradise|garden|love|just|truth|repent|bounty|blessing|provision)/i;
+const QURAN_EXCLUDED_THEMES =
+  /\b(disbeliev|unbeliev|hell|doom|fire|torment|chastise|punish|wrath|curse|slay|fight|kill|war|hypocrit|idolat|pharaoh|wives|divorce|usury|sword|captive|booty|spoils|polythe|jew|christian|evil-doer|wrong-doer|transgress|plague|destroy|drown|stone|blood|swine|carrion|menstru|marr|inherit|bequest|debt|witness|ruin|lawful|forbid)/i;
+function isStandAloneAyah(r: QuranRow): boolean {
+  const len = r.en.length;
+  if (len < 60 || len > 360) return false;
+  if (/^(And|But|Then|So|Or|Nay|Until|When|If|Save|Except|Whereby|Wherein|Who|Which|That)\b/.test(r.en)) return false;
+  if (!/[.!?]["')’]?$/.test(r.en)) return false;
+  return QURAN_GOOD_THEMES.test(r.en) && !QURAN_EXCLUDED_THEMES.test(r.en);
+}
+
+async function seedQuran() {
+  const data = load<QuranRow>('quran.json.gz');
+  const indexByRef = new Map(data.map((r, i) => [`${r.s}:${r.v}`, i]));
+  const refs = [...new Set(loadDailyRefs('quran-daily-refs.txt'))];
+  const missing = refs.filter((ref) => !indexByRef.has(ref));
+  if (missing.length) console.warn(`Unknown references in quran-daily-refs.txt (skipped): ${missing.join(', ')}`);
+  const curated = refs.filter((ref) => indexByRef.has(ref)).map((ref) => indexByRef.get(ref) as number);
+  const curatedSet = new Set(curated);
+  const extended = data.map((r, i) => (!curatedSet.has(i) && isStandAloneAyah(r) ? i : -1)).filter((i) => i >= 0);
+
+  const rows: Row[] = data.map((r) => ({
+    type: VerseType.QURAN,
+    reference: `Quran ${r.s}:${r.v}`,
+    book: r.n,
+    chapter: r.s,
+    verse: r.v,
+    text: r.en,
+    originalText: r.ar,
+    translation: 'Pickthall',
+  }));
+  const res = await seedType(VerseType.QURAN, rows, [curated, extended], ROTATION_SEED + 2);
+  console.log(
+    `Quran: ${rows.length} ayahs (${res.inserted} new), rotation: ${res.tierSizes[0]} curated + ${res.tierSizes[1]} extended (${res.rotationChanged} rotation updates)`,
+  );
+}
+
 async function main() {
   await seedBible();
   await seedGita();
+  await seedQuran();
 }
 
 main()

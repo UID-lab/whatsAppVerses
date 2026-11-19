@@ -13,6 +13,7 @@ datasource db {
 enum VerseType {
   BIBLE
   GITA
+  QURAN
 }
 
 enum SubscriberStatus {
@@ -35,6 +36,12 @@ enum DeliveryStatus {
   UNKNOWN // worker died mid-send; never retried, so nobody gets a duplicate
   SKIPPED // subscriber opted out before the send
   EXPIRED // not sent before its day ended (capacity / downtime)
+}
+
+enum AttemptOutcome {
+  SUCCEEDED // WhatsApp accepted the message
+  FAILED // the send threw an error (see error)
+  UNKNOWN // the process stopped mid-send; outcome can't be known
 }
 
 model Subscriber {
@@ -117,12 +124,21 @@ model Delivery {
   lockedUntil       DateTime?      @db.DateTime(3)
   providerMessageId String?        @db.VarChar(128)
   lastError         String?        @db.VarChar(500)
+  /// When the message was delivered (= completed).
   sentAt            DateTime?      @db.DateTime(3)
+  /// First and most recent failed attempt (null if it never failed).
+  firstFailedAt     DateTime?      @db.DateTime(3)
+  lastFailedAt      DateTime?      @db.DateTime(3)
+  /// True when retrying can't help (e.g. the number isn't on WhatsApp): never auto-requeued.
+  failurePermanent  Boolean        @default(false)
+  /// How many times a FAILED delivery was put back in the queue (automatically or by an admin).
+  requeueCount      Int            @default(0)
   createdAt         DateTime       @default(now()) @db.DateTime(3)
   updatedAt         DateTime       @updatedAt @db.DateTime(3)
 
-  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
-  verse      Verse?     @relation(fields: [verseId], references: [id], onDelete: SetNull)
+  subscriber Subscriber        @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  verse      Verse?            @relation(fields: [verseId], references: [id], onDelete: SetNull)
+  attemptLog DeliveryAttempt[]
 
   /// Idempotency: at most one welcome and one daily verse per subscriber per day, however many
   /// times the cron runs.
@@ -135,6 +151,25 @@ model Delivery {
   @@index([deliveryDate, status])
   @@index([verseId])
   @@map("deliveries")
+}
+
+/// One row per send attempt: a full, timestamped history of failures, retries and the final
+/// success for every message.
+model DeliveryAttempt {
+  id         BigInt          @id @default(autoincrement())
+  deliveryId BigInt
+  /// 1 for the first try, 2 for the first retry, …
+  attemptNo  Int
+  outcome    AttemptOutcome?
+  error      String?         @db.VarChar(500)
+  startedAt  DateTime        @default(now()) @db.DateTime(3)
+  finishedAt DateTime?       @db.DateTime(3)
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@index([deliveryId])
+  @@index([startedAt])
+  @@map("delivery_attempts")
 }
 
 /// Every verse ever handed to a subscriber. The primary key makes it impossible for the same

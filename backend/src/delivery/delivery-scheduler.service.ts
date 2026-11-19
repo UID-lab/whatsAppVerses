@@ -62,6 +62,18 @@ export class DeliverySchedulerService implements OnApplicationShutdown {
     });
   }
 
+  /** Failed messages are re-run automatically until they're delivered (see FAILED_REQUEUE_LIMIT). */
+  @Cron(CronExpression.EVERY_10_MINUTES, { name: 'requeue-failed' })
+  async requeueTick(): Promise<void> {
+    await this.exclusive(async () => {
+      const n = await this.repo.requeueFailed({
+        date: localDate(this.tz),
+        maxRequeues: this.config.get('FAILED_REQUEUE_LIMIT'),
+      });
+      if (n) this.logger.warn(`Re-queued ${n} failed deliveries for another round of attempts`);
+    });
+  }
+
   @Cron(CronExpression.EVERY_30_MINUTES, { name: 'expire-old' })
   async expireTick(): Promise<void> {
     await this.exclusive(async () => {

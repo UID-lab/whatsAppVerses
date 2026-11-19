@@ -2,7 +2,7 @@
   "name": "verse-whatsapp-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Opt-in daily Bible / Bhagavad Gita verses over WhatsApp \u2014 NestJS + Prisma + MySQL",
+  "description": "Opt-in daily Bible / Bhagavad Gita verses over WhatsApp — NestJS + Prisma + MySQL",
   "license": "MIT",
   "engines": {
     "node": ">=22.12.0"
@@ -30,6 +30,7 @@
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
     "@nestjs/schedule": "^12.0.4",
+    "@nestjs/swagger": "^11.4.8",
     "@nestjs/throttler": "^6.4.0",
     "@prisma/client": "^6.19.0",
     "@whiskeysockets/baileys": "7.0.0-rc14",

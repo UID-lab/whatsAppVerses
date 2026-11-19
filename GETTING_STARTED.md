@@ -80,7 +80,10 @@ You should see:
 ```
 Bible (KJV): 31102 verses (31102 new), rotation: 420 curated + 10471 extended (0 rotation updates)
 Bhagavad Gita: 701 verses (701 new), rotation: 654 (ch. 2–18) + 47 (ch. 1) (0 rotation updates)
+Quran: 6236 ayahs (6236 new), rotation: 230 curated + 690 extended (0 rotation updates)
 ```
+
+The verses are now stored in the MySQL `verses` table. The app reads them from there; the data files are only seed input.
 
 (Re-running the seed is safe: it skips verses that already exist.)
 
@@ -115,8 +118,9 @@ npm run dev
 | Sign-up | http://localhost:5173 |
 | Manage / unsubscribe | `/manage?token=…` (link on the "Thank you" screen) |
 | Admin (WhatsApp link, stats) | http://localhost:5173/admin (enter your `ADMIN_API_KEY`) |
+| **API docs (Swagger)** | http://localhost:3000/api/docs: click **Authorize**, paste your `ADMIN_API_KEY` |
 
-1. Enter your **name** and **WhatsApp number**, continue, and pick **Bible** or **Bhagavad Gita**.
+1. Enter your **name** and **WhatsApp number**, continue, and pick **Bible**, **Bhagavad Gita** or **Quran**.
 2. The page says **"Thank you, <name>!"**. The subscriber is saved right away, and this welcome
    message is sent (printed in the backend terminal in console mode):
 
@@ -147,6 +151,23 @@ To send today's verses right away for testing (anyone who already got today's ve
 ```bash
 curl -X POST localhost:3000/api/admin/jobs/enqueue-today -H "x-admin-key: YOUR_ADMIN_KEY"
 ```
+
+### Reports in Swagger
+
+Open http://localhost:3000/api/docs, click **Authorize**, paste `ADMIN_API_KEY`, then use **Try it out**:
+
+| Question | Endpoint |
+|---|---|
+| Who is subscribed right now? | `GET /api/admin/reports/active-subscribers` |
+| How many messages went out today: delivered, failed, pending? | `GET /api/admin/reports/deliveries` (add `date=YYYY-MM-DD` for another day) |
+| Did anyone get the same verse twice? | `GET /api/admin/reports/repeats` (`"repeated": false`) |
+| All of the above | `GET /api/admin/reports/summary` |
+| Every message with attempt history and failed/completed times | `GET /api/admin/deliveries` |
+| Re-run today's failed messages now | `POST /api/admin/deliveries/retry-failed` |
+
+Failed messages are retried automatically: up to 5 attempts with increasing gaps, then the
+message is marked `FAILED`, and every 10 minutes failed messages get another round (up to 3 rounds
+a day). Numbers that aren't on WhatsApp are not retried automatically.
 
 ### Change the wording
 

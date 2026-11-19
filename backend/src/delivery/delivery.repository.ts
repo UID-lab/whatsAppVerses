@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DeliveryKind, DeliveryStatus, Prisma, SubscriberStatus } from '@prisma/client';
+import { AttemptOutcome, DeliveryKind, DeliveryStatus, Prisma, SubscriberStatus } from '@prisma/client';
 import { randomInt } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -132,13 +132,22 @@ export class DeliveryRepository {
     await this.prisma.delivery.update({ where: { id }, data: { verseId } });
   }
 
-  /** Point of no return: after this, a crash means UNKNOWN (never retried), not a duplicate. */
-  async markSending(id: bigint, owner: string): Promise<boolean> {
-    const res = await this.prisma.delivery.updateMany({
-      where: { id, status: DeliveryStatus.PROCESSING, lockedBy: owner },
-      data: { status: DeliveryStatus.SENDING, lockedUntil: new Date(Date.now() + 5 * 60_000) },
+  /**
+   * Point of no return: after this, a crash means UNKNOWN (never retried), not a duplicate.
+   * Also opens a row in delivery_attempts (started now), numbered across all retry rounds
+   * (1, 2, 3 …). Returns that attempt's id, or null if this worker lost its claim.
+   */
+  async markSending(id: bigint, owner: string): Promise<bigint | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const res = await tx.delivery.updateMany({
+        where: { id, status: DeliveryStatus.PROCESSING, lockedBy: owner },
+        data: { status: DeliveryStatus.SENDING, lockedUntil: new Date(Date.now() + 5 * 60_000) },
+      });
+      if (res.count !== 1) return null;
+      const previous = await tx.deliveryAttempt.count({ where: { deliveryId: id } });
+      const attempt = await tx.deliveryAttempt.create({ data: { deliveryId: id, attemptNo: previous + 1 } });
+      return attempt.id;
     });
-    return res.count === 1;
   }
 
   /** `advanceProgress` is false for the welcome greeting, which carries no verse. */
@@ -148,19 +157,26 @@ export class DeliveryRepository {
     providerMessageId: string | null,
     resolvedAddress: string | null | undefined,
     advanceProgress: boolean,
+    attemptId: bigint,
   ) {
     const step = advanceProgress ? 1 : 0;
+    const now = new Date();
     await this.prisma.$transaction([
       this.prisma.delivery.update({
         where: { id },
         data: {
           status: DeliveryStatus.SENT,
-          sentAt: new Date(),
+          sentAt: now,
           providerMessageId,
           lockedBy: null,
           lockedUntil: null,
           lastError: null,
+          failurePermanent: false,
         },
+      }),
+      this.prisma.deliveryAttempt.update({
+        where: { id: attemptId },
+        data: { outcome: AttemptOutcome.SUCCEEDED, finishedAt: now },
       }),
       this.prisma.$executeRaw`
         UPDATE subscribers
@@ -170,28 +186,98 @@ export class DeliveryRepository {
     ]);
   }
 
-  async markRetry(id: bigint, error: string, delayMs: number, refundAttempt = false): Promise<void> {
-    await this.prisma.delivery.update({
-      where: { id },
-      data: {
-        status: DeliveryStatus.PENDING,
-        nextAttemptAt: new Date(Date.now() + delayMs),
-        lastError: error.slice(0, 500),
-        lockedBy: null,
-        lockedUntil: null,
-        ...(refundAttempt ? { attempts: { decrement: 1 } } : {}),
-      },
-    });
+  /** A failed attempt that will be retried automatically after `delayMs`. */
+  async markRetry(id: bigint, error: string, delayMs: number, attemptId: bigint): Promise<void> {
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.deliveryAttempt.update({
+        where: { id: attemptId },
+        data: { outcome: AttemptOutcome.FAILED, error: error.slice(0, 500), finishedAt: now },
+      }),
+      this.prisma.$executeRaw`
+        UPDATE deliveries
+        SET status = 'PENDING', nextAttemptAt = ${new Date(now.getTime() + delayMs)}, lastError = ${error.slice(0, 500)},
+            lockedBy = NULL, lockedUntil = NULL, firstFailedAt = COALESCE(firstFailedAt, ${now}),
+            lastFailedAt = ${now}, updatedAt = NOW(3)
+        WHERE id = ${id}`,
+    ]);
   }
 
-  async markFailed(id: bigint, subscriberId: number, error: string): Promise<void> {
+  /**
+   * Put a delivery back in the queue without counting a failure (daily cap reached, no verses
+   * loaded yet …). If an attempt row was opened for it, it is removed: nothing was sent.
+   */
+  async defer(id: bigint, reason: string, delayMs: number, attemptId?: bigint | null): Promise<void> {
     await this.prisma.$transaction([
+      ...(attemptId ? [this.prisma.deliveryAttempt.delete({ where: { id: attemptId } })] : []),
       this.prisma.delivery.update({
         where: { id },
-        data: { status: DeliveryStatus.FAILED, lastError: error.slice(0, 500), lockedBy: null, lockedUntil: null },
+        data: {
+          status: DeliveryStatus.PENDING,
+          nextAttemptAt: new Date(Date.now() + delayMs),
+          lastError: reason.slice(0, 500),
+          lockedBy: null,
+          lockedUntil: null,
+          attempts: { decrement: 1 },
+        },
       }),
+    ]);
+  }
+
+  /**
+   * Gives up on a delivery for now. `permanent` = retrying can't help (e.g. not on WhatsApp);
+   * otherwise the automatic re-queue sweep will try it again later today.
+   * The verse is detached so a later retry picks a fresh one (the old one was released).
+   */
+  async markFailed(id: bigint, subscriberId: number, error: string, permanent: boolean, attemptId: bigint): Promise<void> {
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.deliveryAttempt.update({
+        where: { id: attemptId },
+        data: { outcome: AttemptOutcome.FAILED, error: error.slice(0, 500), finishedAt: now },
+      }),
+      this.prisma.$executeRaw`
+        UPDATE deliveries
+        SET status = 'FAILED', lastError = ${error.slice(0, 500)}, lockedBy = NULL, lockedUntil = NULL,
+            failurePermanent = ${permanent}, verseId = NULL,
+            firstFailedAt = COALESCE(firstFailedAt, ${now}), lastFailedAt = ${now}, updatedAt = NOW(3)
+        WHERE id = ${id}`,
       this.prisma.subscriber.update({ where: { id: subscriberId }, data: { consecutiveFailures: { increment: 1 } } }),
     ]);
+  }
+
+  /**
+   * Re-queues FAILED deliveries so they are sent again (fresh attempt budget). Without `ids` it
+   * re-queues every retryable FAILED delivery of `date` that hasn't hit `maxRequeues`.
+   * `includePermanent` also re-queues permanent failures (manual admin action).
+   */
+  async requeueFailed(opts: {
+    date?: Date;
+    ids?: bigint[];
+    maxRequeues?: number;
+    includePermanent?: boolean;
+  }): Promise<number> {
+    const where: Prisma.DeliveryWhereInput = {
+      status: { in: [DeliveryStatus.FAILED, DeliveryStatus.EXPIRED] },
+      ...(opts.ids ? { id: { in: opts.ids } } : {}),
+      ...(opts.date ? { deliveryDate: opts.date } : {}),
+      ...(opts.includePermanent ? {} : { failurePermanent: false }),
+      ...(opts.maxRequeues !== undefined ? { requeueCount: { lt: opts.maxRequeues } } : {}),
+    };
+    if (!opts.ids) where.status = DeliveryStatus.FAILED; // the sweep never revives EXPIRED days
+    const res = await this.prisma.delivery.updateMany({
+      where,
+      data: {
+        status: DeliveryStatus.PENDING,
+        attempts: 0,
+        nextAttemptAt: new Date(),
+        failurePermanent: false,
+        lockedBy: null,
+        lockedUntil: null,
+        requeueCount: { increment: 1 },
+      },
+    });
+    return res.count;
   }
 
   async markSkipped(id: bigint, reason: string): Promise<void> {
@@ -199,6 +285,25 @@ export class DeliveryRepository {
       where: { id },
       data: { status: DeliveryStatus.SKIPPED, lastError: reason, lockedBy: null, lockedUntil: null },
     });
+  }
+
+  /**
+   * True while this subscriber's welcome for `date` may still go out: waiting, being sent, or
+   * FAILED but still due for an automatic re-run (not permanent, re-runs left).
+   */
+  async welcomePending(subscriberId: number, date: Date, maxRequeues: number): Promise<boolean> {
+    const n = await this.prisma.delivery.count({
+      where: {
+        subscriberId,
+        deliveryDate: date,
+        kind: DeliveryKind.WELCOME,
+        OR: [
+          { status: { in: [DeliveryStatus.PENDING, DeliveryStatus.PROCESSING, DeliveryStatus.SENDING] } },
+          { status: DeliveryStatus.FAILED, failurePermanent: false, requeueCount: { lt: maxRequeues } },
+        ],
+      },
+    });
+    return n > 0;
   }
 
   /** On graceful shutdown: give back rows we claimed but never started sending. */
@@ -221,6 +326,12 @@ export class DeliveryRepository {
       SET status = 'UNKNOWN', lockedBy = NULL, lockedUntil = NULL, updatedAt = NOW(3),
           lastError = 'Sender stopped mid-send; not retried to avoid a duplicate'
       WHERE status = 'SENDING' AND lockedUntil < NOW(3)`;
+    if (unknown > 0) {
+      await this.prisma.$executeRaw`
+        UPDATE delivery_attempts a JOIN deliveries d ON d.id = a.deliveryId
+        SET a.outcome = 'UNKNOWN', a.finishedAt = NOW(3), a.error = 'Sender stopped mid-send'
+        WHERE d.status = 'UNKNOWN' AND a.finishedAt IS NULL`;
+    }
     return { requeued, unknown };
   }
 

@@ -18,7 +18,7 @@ import { SenderStateRepository } from './sender-state.repository';
       useFactory: (config: AppConfigService, prisma: PrismaService, state: SenderStateRepository): MessagingProvider => {
         switch (config.get('MESSAGING_PROVIDER')) {
           case 'console':
-            return new ConsoleMessagingProvider();
+            return new ConsoleMessagingProvider(config.get('CONSOLE_FAIL_FIRST_ATTEMPTS'));
           case 'baileys':
           default:
             return new BaileysMessagingProvider(prisma, config, state);

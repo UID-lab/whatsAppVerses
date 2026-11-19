@@ -1,9 +1,11 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
+import { ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../prisma/prisma.service';
 import { SenderStateRepository } from '../messaging/sender-state.repository';
 
 /** Liveness/readiness for load balancers and uptime monitors. */
+@ApiTags('Health')
 @Controller('health')
 @SkipThrottle()
 export class HealthController {

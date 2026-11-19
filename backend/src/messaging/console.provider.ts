@@ -6,6 +6,7 @@ import {
   ProviderStatus,
   Recipient,
   SendResult,
+  TransientSendError,
 } from './messaging.types';
 
 /**
@@ -17,6 +18,10 @@ export class ConsoleMessagingProvider implements MessagingProvider {
   private readonly logger = new Logger('ConsoleProvider');
   private started = false;
   private handlers: InboundHandler[] = [];
+  private readonly sendsPerRecipient = new Map<string, number>();
+
+  /** `failFirstAttempts` > 0 makes the first N sends to each recipient fail (to test retries). */
+  constructor(private readonly failFirstAttempts = 0) {}
 
   async start(): Promise<void> {
     this.started = true;
@@ -36,6 +41,13 @@ export class ConsoleMessagingProvider implements MessagingProvider {
   }
 
   async sendText(to: Recipient, text: string): Promise<SendResult> {
+    const key = to.channelAddress ?? to.phoneE164;
+    const n = (this.sendsPerRecipient.get(key) ?? 0) + 1;
+    this.sendsPerRecipient.set(key, n);
+    if (n <= this.failFirstAttempts) {
+      this.logger.warn(`✗ simulated failure ${n}/${this.failFirstAttempts} for ${key}`);
+      throw new TransientSendError(`Simulated failure ${n} (CONSOLE_FAIL_FIRST_ATTEMPTS)`);
+    }
     this.logger.log(`→ ${to.channelAddress ?? to.phoneE164}\n${text}`);
     return { providerMessageId: randomUUID() };
   }

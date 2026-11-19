@@ -1,6 +1,6 @@
 # Daily Verse on WhatsApp
 
-People enter their name and number on a React page, choose **Bible** or **Bhagavad Gita** verses,
+People enter their name and number on a React page, choose **Bible**, **Bhagavad Gita** or **Quran** verses,
 get a personal welcome message right away, and then one verse every day (from the first day) on WhatsApp from
 **+91 89717 75506**. It's all free, self-hosted software: NestJS + Prisma +
 MySQL, with no per-message API costs.
@@ -55,14 +55,20 @@ A `console` provider logs messages instead of sending them, for development.
 
 ---
 
-## 2. Verse content (free, bundled, no runtime API)
+## 2. Verse content (stored in MySQL; free, openly licensed)
+
+All verses live in the MySQL **`verses`** table (Bible 31,102 · Gita 701 · Quran 6,236 rows). The
+app reads verses **only from the database**. The gzipped files below are just the one-time seed
+input: `npm run prisma:seed` loads them into `verses`, and nothing reads them afterwards.
+`GET /api/admin/reports/summary` → `versesInDatabase` shows the counts straight from MySQL.
 
 | Type | Text | License | File |
 |---|---|---|---|
 | Bible | King James Version (1769), all 31,102 verses | Public domain | `backend/prisma/data/bible-kjv.json.gz` |
 | Bhagavad Gita | All 701 verses: Sanskrit + IAST transliteration + English by **Shri Purohit Swami** (1935) | Sanskrit/transliteration: public domain. Purohit Swami died in 1941, so the translation is public domain in India (life + 60 years). Compilation: Unlicense ([gita/gita](https://github.com/gita/gita)) | `backend/prisma/data/gita.json.gz` |
+| Quran | All 6,236 ayahs: Arabic (Uthmani script) + English by **Marmaduke Pickthall** (1930) | Pickthall died in 1936; the translation is public domain. Arabic text: *Tanzil Quran Text (Uthmani)*, [tanzil.net](https://tanzil.net), CC BY 3.0, used verbatim with this attribution | `backend/prisma/data/quran.json.gz` |
 
-The datasets (1.5 MB gzipped) ship in the repo and load during the seed. Nothing is fetched at
+The datasets (2.1 MB gzipped) ship in the repo and load during the seed. Nothing is fetched at
 runtime, so nothing can rate-limit you or disappear. `npm run datasets:build` regenerates them from
 the sources listed in [`scripts/build-datasets.mjs`](backend/scripts/build-datasets.mjs).
 If you serve users outside India, check the Purohit Swami translation's status in their
@@ -76,6 +82,7 @@ jurisdictions. Swapping in another public-domain translation means changing one 
    |---|---|---|---|
    | **Bible** | 420 well-known verses from [`bible-daily-refs.txt`](backend/prisma/data/bible-daily-refs.txt) | 10,471 more verses that read well on their own (full sentences; no genealogies or mid-story fragments) | 10,891 ≈ **29.8 years** |
    | **Gita** | 654 verses, chapters 2–18 | 47 verses of chapter 1 | all 701 ≈ **1.9 years** |
+   | **Quran** | 230 well-known ayahs from [`quran-daily-refs.txt`](backend/prisma/data/quran-daily-refs.txt) | 690 more ayahs on universal devotional themes (mercy, patience, prayer, gratitude, guidance). Ayahs about punishment, warfare, legal rulings or specific communities are left out, because a single ayah out of context can easily mislead | 920 ≈ **2.5 years** |
 
 2. Each subscriber starts at a random point in each tier (`rotationOffset`) and walks forward, so
    different people get different verses on the same day.
@@ -104,7 +111,8 @@ jurisdictions. Swapping in another public-domain translation means changing one 
 | Large subscriber counts | Keyset pagination over `subscribers (status, id)` with `createMany` batches of 1,000. **50,000 subscribers enqueue in ~3 s** (measured on MariaDB) |
 | Queue without Redis | MySQL table with `SELECT … FOR UPDATE SKIP LOCKED`. Free Redis tiers (e.g. Upstash) cap commands per month, and BullMQ's polling burns through that quota. That would be the step that forces a paid upgrade, so it's avoided |
 | No duplicates | `UNIQUE(subscriberId, deliveryDate, kind)` (at most one welcome and one daily verse per person per day) makes enqueue idempotent (cron re-runs, catch-up after downtime, several replicas). Rows go `PROCESSING → SENDING → SENT`. If a process dies **during** a send, the row becomes `UNKNOWN` and is **never retried**: a rare missed day rather than a duplicate |
-| Retries | Transient errors → `PENDING` with exponential backoff and jitter (30 s → 1 h), up to `MAX_DELIVERY_ATTEMPTS`. Permanent errors (number not on WhatsApp) → `FAILED` |
+| Retries | Transient errors → `PENDING` with exponential backoff and jitter (30 s → 1 h), up to `MAX_DELIVERY_ATTEMPTS` (5). Then `FAILED`, and a sweep **re-runs** the day's failed messages every 10 minutes, up to `FAILED_REQUEUE_LIMIT` (3) rounds, until they're delivered. Errors that can't succeed (number not on WhatsApp) are `FAILED` with `failurePermanent` and are never auto-rerun. Admins can re-run any failed message (`POST /api/admin/deliveries/retry-failed`, `…/{id}/retry`) |
+| History & timestamps | Every send attempt is a row in `delivery_attempts` (attempt no., start, finish, outcome `SUCCEEDED`/`FAILED`/`UNKNOWN`, error). Each delivery also records `firstFailedAt`, `lastFailedAt`, `sentAt` (completed) and `requeueCount`. A day's verse is held back until that person's welcome has gone out, so the welcome always arrives first |
 | Crash recovery | Claims carry `lockedBy/lockedUntil`. A reaper re-queues abandoned claims every minute, and graceful shutdown hands claims back immediately |
 | Missed cron | The daily job checks every minute ("is it past the send time and not done today?"), so a restart at 07:00 doesn't skip a day |
 | Indexes | `deliveries(status, nextAttemptAt)` for claims (verified with `EXPLAIN`: range + covering index), `(status, lockedUntil)` for the reaper, `(deliveryDate, status)` for expiry/stats, `subscribers(status, id)` for enqueue, unique `phoneE164`, `confirmCode`, `manageToken`, `verses(type, rotationIndex)` |
@@ -205,12 +213,21 @@ Tests: `cd backend && npm test`.
 | Method & path | Purpose |
 |---|---|
 | `GET /api/subscribers/options` | Verse types, opt-in mode, send time |
-| `POST /api/subscribers` `{phone, verseType: "BIBLE"\|"GITA"}` | Register. Returns the masked number, `manageToken` and, if pending, `confirmation {code, whatsappUrl, expiresAt}`. `409` if already active |
+| `POST /api/subscribers` `{name, phone, verseType: "BIBLE"\|"GITA"\|"QURAN"}` | Register. Returns the masked number, `manageToken` and, if pending, `confirmation {code, whatsappUrl, expiresAt}`. `409` if already active |
 | `GET /api/subscribers/manage/:token` | Status (polled by the UI while waiting for `JOIN`) |
 | `POST /api/subscribers/manage/:token/unsubscribe` | Opt out |
 | `GET /api/health` | DB + WhatsApp state |
 | `GET /api/admin/whatsapp` · `POST …/pairing-code` · `POST …/logout` | Linking (header `x-admin-key`) |
 | `GET /api/admin/stats` · `POST /api/admin/jobs/enqueue-today` | Operations |
+| `GET /api/admin/reports/summary?date=` | Everything at a glance: active users, the day's delivered/failed/pending counts, repeat check, verses in MySQL |
+| `GET /api/admin/reports/active-subscribers` | Currently active users (name, number, verse type, verses received/remaining, today's status) |
+| `GET /api/admin/reports/deliveries?date=` | Delivered / failed / pending, failed & successful attempts, recovered-after-failure, per kind and verse type |
+| `GET /api/admin/reports/repeats` | `repeated: true/false`, plus any subscriber+verse pair sent more than once |
+| `GET /api/admin/deliveries?date=&status=` · `GET …/{id}` | Messages with full attempt history and failed/completed timestamps |
+| `POST /api/admin/deliveries/retry-failed?date=` · `POST …/{id}/retry` | Re-run failed messages now |
+
+**Swagger UI: http://localhost:3000/api/docs** (JSON: `/api/docs-json`). Click **Authorize**, paste
+`ADMIN_API_KEY` (sent as the `x-admin-key` header), then **Try it out** on any endpoint.
 
 ---
 
@@ -284,7 +301,7 @@ All variables are documented in [`backend/.env.example`](backend/.env.example) a
 The ones that matter most:
 `MESSAGES_PER_MINUTE` (6), `DAILY_SEND_CAP` (400), `DAILY_SEND_TIME` (07:00),
 `SEND_WINDOW_START/END`, `APP_TIMEZONE` (Asia/Kolkata), `OPT_IN_MODE`, `PROCESS_ROLE`,
-`DELIVERY_RETENTION_DAYS`.
+`DELIVERY_RETENTION_DAYS`, `MAX_DELIVERY_ATTEMPTS`, `FAILED_REQUEUE_LIMIT`.
 
 ---
 
@@ -315,6 +332,8 @@ The ones that matter most:
    cron usually count as activity, but keep an eye on it. Managed free databases have small storage
    and connection limits; the retention purge keeps this app small (~300 bytes per delivery row).
 8. **Translation licensing.** KJV is public domain (the UK's Crown patent aside). The Gita English
-   text is public domain in India but may still be copyrighted elsewhere. See §2.
+   text is public domain in India but may still be copyrighted elsewhere. Pickthall's Quran
+   translation is public domain; the Arabic Quran text (Tanzil) is CC BY 3.0, so keep the
+   attribution in §2 and don't alter the text. See §2.
 9. **Rate limiting is per replica (in memory).** That's enough for one or a few instances. Behind
    many replicas, rely on the reverse proxy or Cloudflare to limit the sign-up endpoint.

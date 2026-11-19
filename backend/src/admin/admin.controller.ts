@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
+import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { VerseType } from '@prisma/client';
 import QRCode from 'qrcode';
 import { AdminApiKeyGuard } from '../common/guards/admin-api-key.guard';
@@ -28,6 +29,8 @@ import { VersesService } from '../verses/verses.service';
 import { PairingCodeDto, SimulateInboundDto } from './admin.dto';
 
 /** Operator endpoints (WhatsApp linking, stats). Requires the `x-admin-key` header. */
+@ApiTags('Admin: WhatsApp & jobs')
+@ApiSecurity('admin-key')
 @Controller('admin')
 @UseGuards(AdminApiKeyGuard)
 @SkipThrottle()
@@ -85,12 +88,13 @@ export class AdminController {
   @Get('stats')
   async stats() {
     const today = localDate(this.config.get('APP_TIMEZONE'));
-    const [subscribers, deliveriesToday, sentToday, bible, gita, repeatedVerses] = await Promise.all([
+    const [subscribers, deliveriesToday, sentToday, bible, gita, quran, repeatedVerses] = await Promise.all([
       this.subscribers.countsByStatusAndType(),
       this.deliveries.statusCounts(today),
       this.outbound.sentToday(),
       this.verses.poolSize(VerseType.BIBLE),
       this.verses.poolSize(VerseType.GITA),
+      this.verses.poolSize(VerseType.QURAN),
       this.verses.countRepeatedDeliveries(),
     ]);
     return {
@@ -100,7 +104,7 @@ export class AdminController {
       sentToday,
       dailySendCap: this.config.get('DAILY_SEND_CAP'),
       messagesPerMinute: this.config.get('MESSAGES_PER_MINUTE'),
-      rotationPool: { BIBLE: bible, GITA: gita },
+      rotationPool: { BIBLE: bible, GITA: gita, QURAN: quran },
       /** Subscriber+verse pairs delivered more than once (within the retention window). Always 0. */
       repeatedVerses,
     };

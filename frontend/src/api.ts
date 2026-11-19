@@ -1,4 +1,4 @@
-export type VerseType = 'BIBLE' | 'GITA';
+export type VerseType = 'BIBLE' | 'GITA' | 'QURAN';
 export type SubscriberStatus = 'PENDING' | 'ACTIVE' | 'UNSUBSCRIBED';
 
 export interface Subscription {

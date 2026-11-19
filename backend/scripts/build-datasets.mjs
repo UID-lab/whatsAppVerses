@@ -2,9 +2,11 @@
 /**
  * Rebuilds the bundled, gzipped verse datasets in prisma/data/.
  * Only maintainers need this: the generated files are committed, so the seed
- * (and production) never depend on these URLs being reachable.
+ * (and production) never depend on these URLs being reachable. The seed loads
+ * them into the MySQL `verses` table; the app only ever reads verses from MySQL.
  *
- *   node scripts/build-datasets.mjs
+ *   node scripts/build-datasets.mjs              # all datasets
+ *   node scripts/build-datasets.mjs quran        # only one (bible | gita | quran)
  *
  * Sources
  *  - Bible: King James Version (1769), public domain.
@@ -13,6 +15,11 @@
  *    English rendering by Shri Purohit Swami (1935; author d. 1941, public
  *    domain in India under life+60). Compilation released under The Unlicense.
  *      https://github.com/gita/gita (data/verse.json, data/translation.json)
+ *  - Quran: English translation by Mohammed Marmaduke Pickthall (1930; author d. 1936),
+ *    public domain. Arabic (Uthmani script) from the Tanzil Project, CC BY 3.0 — used
+ *    verbatim with attribution: "Tanzil Quran Text (Uthmani), https://tanzil.net".
+ *      https://api.alquran.cloud/v1/quran/en.pickthall
+ *      https://api.alquran.cloud/v1/quran/quran-uthmani
  */
 import { writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
@@ -24,6 +31,11 @@ const KJV_URL = 'https://raw.githubusercontent.com/scrollmapper/bible_databases/
 const GITA_VERSES_URL = 'https://raw.githubusercontent.com/gita/gita/main/data/verse.json';
 const GITA_TRANSLATIONS_URL = 'https://raw.githubusercontent.com/gita/gita/main/data/translation.json';
 const GITA_TRANSLATOR = 'Shri Purohit Swami';
+const QURAN_EN_URL = 'https://api.alquran.cloud/v1/quran/en.pickthall';
+const QURAN_AR_URL = 'https://api.alquran.cloud/v1/quran/quran-uthmani';
+// The API prefixes verse 1 of every surah (except 1 and 9) with the four-word Bismillah;
+// Tanzil's original text does not, so it is removed to keep the text verbatim.
+const BISMILLAH_FIRST_WORD = 'بِسْمِ';
 
 const getJson = async (url) => {
   const res = await fetch(url);
@@ -72,5 +84,32 @@ async function buildGita() {
   console.log(`gita: ${rows.length} verses (${rows.filter((r) => r.en).length} with English)`);
 }
 
-await buildBible();
-await buildGita();
+async function buildQuran() {
+  const [en, ar] = await Promise.all([getJson(QURAN_EN_URL), getJson(QURAN_AR_URL)]);
+  const rows = [];
+  en.data.surahs.forEach((surah, si) => {
+    const arSurah = ar.data.surahs[si];
+    if (arSurah.number !== surah.number) throw new Error(`Surah mismatch at ${si}`);
+    surah.ayahs.forEach((ayah, ai) => {
+      let arabic = arSurah.ayahs[ai].text.replace(/^\uFEFF/, '').trim();
+      if (ayah.numberInSurah === 1 && surah.number !== 1 && surah.number !== 9 && arabic.startsWith(BISMILLAH_FIRST_WORD)) {
+        arabic = arabic.split(/\s+/).slice(4).join(' ');
+      }
+      rows.push({
+        s: surah.number,
+        n: surah.englishName,
+        v: ayah.numberInSurah,
+        ar: arabic,
+        en: clean(ayah.text),
+      });
+    });
+  });
+  if (rows.length !== 6236) throw new Error(`Expected 6236 ayahs, got ${rows.length}`);
+  writeFileSync(join(OUT, 'quran.json.gz'), gzipSync(JSON.stringify(rows), { level: 9 }));
+  console.log(`quran: ${rows.length} ayahs`);
+}
+
+const only = process.argv[2]?.toLowerCase();
+if (!only || only === 'bible') await buildBible();
+if (!only || only === 'gita') await buildGita();
+if (!only || only === 'quran') await buildQuran();

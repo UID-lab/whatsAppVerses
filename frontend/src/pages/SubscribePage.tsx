@@ -5,7 +5,8 @@ import { QrImage } from '../components/QrImage';
 
 type Step = 'phone' | 'type' | 'confirm' | 'done';
 
-const VERSE_ICONS: Record<VerseType, string> = { BIBLE: '📖', GITA: '🪷' };
+const VERSE_ICONS: Record<VerseType, string> = { BIBLE: '📖', GITA: '🪷', QURAN: '🌙' };
+const VERSE_NAMES: Record<VerseType, string> = { BIBLE: 'Bible', GITA: 'Bhagavad Gita', QURAN: 'Quran' };
 
 export function SubscribePage() {
   const [step, setStep] = useState<Step>('phone');
@@ -71,7 +72,7 @@ export function SubscribePage() {
         <form onSubmit={submitPhone} noValidate>
           <h1>A verse for you every Morning </h1>
           <p className="lead">
-            Get one Bible or Bhagavad Gita verse every day{options ? ` at ${options.sendTime}` : ''}. Free, no app, unsubscribe anytime.
+            Get one Bible, Bhagavad Gita or Quran verse every day{options ? ` at ${options.sendTime}` : ''}. Free, no app, unsubscribe anytime.
           </p>
           <label htmlFor="name">Your name</label>
           <input
@@ -147,6 +148,7 @@ export function SubscribePage() {
 const defaultTypes: Options['verseTypes'] = [
   { id: 'BIBLE', label: 'Bible verses', description: 'King James Version' },
   { id: 'GITA', label: 'Bhagavad Gita verses', description: 'Sanskrit with English translation' },
+  { id: 'QURAN', label: 'Quran verses', description: 'Arabic with English translation (Pickthall)' },
 ];
 
 function Progress({ step, withConfirm }: { step: Step; withConfirm: boolean }) {
@@ -217,7 +219,7 @@ function Done({ subscription }: { subscription: Subscription }) {
       <h1>Thank you{subscription.name ? `, ${subscription.name.split(' ')[0]}` : ''}!</h1>
       <p className="lead">
         You'll get a welcome message on WhatsApp at {subscription.phone} in a moment. Your daily{' '}
-        {subscription.verseType === 'BIBLE' ? 'Bible' : 'Bhagavad Gita'} verses start tomorrow morning.
+        {VERSE_NAMES[subscription.verseType]} verses start tomorrow morning.
       </p>
       <p className="help">
         Reply <b>STOP</b> on WhatsApp to unsubscribe, or keep this link: <a href={manageUrl}>manage subscription</a>.

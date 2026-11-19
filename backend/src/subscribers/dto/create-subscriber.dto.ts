@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import { IsEnum, IsNotEmpty, IsString, Length, Matches, MaxLength } from 'class-validator';
 import { VerseType } from '@prisma/client';
+import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateSubscriberDto {
   /** Used to greet the subscriber ("Hi Priya,"). Letters in any script, spaces, . ' - */
@@ -10,14 +11,17 @@ export class CreateSubscriberDto {
   @IsNotEmpty({ message: 'Please enter your name.' })
   @IsString({ message: 'Please enter your name.' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value))
+  @ApiProperty({ example: 'Stanley', maxLength: 60 })
   name: string;
 
   /** Any common format; normalized server-side to E.164 (India assumed without a country code). */
   @IsString()
   @Length(6, 32)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ApiProperty({ example: '8861286408', description: 'Any format; India (+91) assumed without a country code' })
   phone: string;
 
-  @IsEnum(VerseType, { message: 'verseType must be BIBLE or GITA' })
+  @IsEnum(VerseType, { message: 'verseType must be BIBLE, GITA or QURAN' })
+  @ApiProperty({ enum: VerseType, example: 'BIBLE' })
   verseType: VerseType;
 }

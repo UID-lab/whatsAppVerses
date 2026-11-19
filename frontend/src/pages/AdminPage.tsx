@@ -135,7 +135,7 @@ export function AdminPage() {
             Sent {stats.sentToday} / {stats.dailySendCap} (cap) · pace {stats.messagesPerMinute}/min
           </p>
           <p>
-            Verse pool: {stats.rotationPool.BIBLE} Bible · {stats.rotationPool.GITA} Gita · Repeated verses:{' '}
+            Verse pool: {stats.rotationPool.BIBLE} Bible · {stats.rotationPool.GITA} Gita · {stats.rotationPool.QURAN} Quran · Repeated verses:{' '}
             <span className={`badge badge-${stats.repeatedVerses === 0 ? 'active' : 'pending'}`}>{stats.repeatedVerses}</span>
           </p>
           <table className="table">

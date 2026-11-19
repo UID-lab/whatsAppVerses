@@ -30,7 +30,7 @@ export function ManagePage() {
   if (error) return <p className="error" role="alert">{error}</p>;
   if (!sub) return <p className="waiting"><span className="spinner" aria-hidden /> Loading…</p>;
 
-  const label = sub.verseType === 'BIBLE' ? 'Bible verses' : 'Bhagavad Gita verses';
+  const label = { BIBLE: 'Bible verses', GITA: 'Bhagavad Gita verses', QURAN: 'Quran verses' }[sub.verseType];
   return (
     <section>
       <h1>Your subscription</h1>

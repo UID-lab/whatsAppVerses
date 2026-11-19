@@ -2,7 +2,7 @@
  * Proves the no-repeat guarantee against your real database.
  *
  *   npm run verify:no-repeats              # both types (Bible takes ~1 minute)
- *   npm run verify:no-repeats -- GITA      # one type
+ *   npm run verify:no-repeats -- QURAN     # one type (BIBLE | GITA | QURAN)
  *
  * For each verse type it creates a temporary test subscriber (status UNSUBSCRIBED, so nothing
  * is ever sent to it), then draws verses one "day" at a time with the exact selection code the
@@ -90,7 +90,10 @@ async function verifyType(type: VerseType) {
 
 async function main() {
   const arg = process.argv[2]?.toUpperCase();
-  const types = arg === 'BIBLE' || arg === 'GITA' ? [arg as VerseType] : [VerseType.GITA, VerseType.BIBLE];
+  const types =
+    arg === 'BIBLE' || arg === 'GITA' || arg === 'QURAN'
+      ? [arg as VerseType]
+      : [VerseType.GITA, VerseType.QURAN, VerseType.BIBLE];
   try {
     for (const type of types) await verifyType(type);
   } finally {

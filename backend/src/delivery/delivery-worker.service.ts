@@ -135,6 +135,13 @@ export class DeliveryWorkerService implements OnModuleInit {
     let text: string;
     let verseId: number | null = null;
     const isWelcome = d.kind === DeliveryKind.WELCOME;
+
+    // The welcome always arrives first: hold the day's verse while the welcome can still go out
+    // (pending, retrying, or failed but due for a re-run). If it can't, the verse goes anyway.
+    if (!isWelcome && (await this.repo.welcomePending(sub.id, d.deliveryDate, this.config.get('FAILED_REQUEUE_LIMIT')))) {
+      await this.repo.defer(d.id, 'Waiting for the welcome message to be delivered first', 60_000);
+      return;
+    }
     if (isWelcome) {
       // Greeting only; the first verse goes out with tomorrow's daily run.
       text = formatWelcomeMessage(sub.name, this.config.get('BRAND_NAME'), this.firstVerseText());
@@ -151,7 +158,7 @@ export class DeliveryWorkerService implements OnModuleInit {
         if (!verse) {
           const pool = await this.verses.poolSize(sub.verseType);
           if (pool === 0) {
-            await this.repo.markRetry(d.id, 'No verses available (seed not run?)', 30 * 60_000, true);
+            await this.repo.defer(d.id, 'No verses available (seed not run?)', 30 * 60_000);
           } else {
             this.logger.log(`Subscriber ${sub.id} has received all ${pool} ${sub.verseType} verses; nothing left to send`);
             await this.repo.markSkipped(d.id, `All ${pool} ${sub.verseType} verses already delivered`);
@@ -164,22 +171,26 @@ export class DeliveryWorkerService implements OnModuleInit {
       text = formatVerseMessage(verse);
     }
 
-    if (!(await this.repo.markSending(d.id, this.config.instanceId))) return; // lock lost
+    const attemptId = await this.repo.markSending(d.id, this.config.instanceId);
+    if (attemptId === null) return; // lock lost
 
     try {
       const result = await this.outbound.send({ phoneE164: sub.phoneE164, channelAddress: sub.channelAddress }, text);
-      await this.repo.markSent(d.id, sub.id, result.providerMessageId, result.resolvedAddress, !isWelcome);
+      await this.repo.markSent(d.id, sub.id, result.providerMessageId, result.resolvedAddress, !isWelcome, attemptId);
     } catch (err) {
       const message = (err as Error).message;
       if (err instanceof DailyCapReachedError) {
-        await this.repo.markRetry(d.id, message, 60 * 60_000, true);
+        await this.repo.defer(d.id, message, 60 * 60_000, attemptId);
       } else if (err instanceof PermanentSendError || d.attempts >= this.config.get('MAX_DELIVERY_ATTEMPTS')) {
-        this.logger.warn(`Delivery ${d.id} failed permanently: ${message}`);
-        await this.repo.markFailed(d.id, sub.id, message);
+        const permanent = err instanceof PermanentSendError;
+        this.logger.warn(
+          `Delivery ${d.id} failed${permanent ? ' permanently' : ` after ${d.attempts} attempts (will be re-queued)`}: ${message}`,
+        );
+        await this.repo.markFailed(d.id, sub.id, message, permanent, attemptId);
         // Never delivered, so the verse stays available for this subscriber on a later day.
         if (verseId !== null) await this.verses.release(sub.id, verseId);
       } else {
-        await this.repo.markRetry(d.id, message, retryDelayMs(d.attempts));
+        await this.repo.markRetry(d.id, message, retryDelayMs(d.attempts), attemptId);
       }
     }
   }

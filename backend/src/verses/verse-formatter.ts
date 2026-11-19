@@ -27,6 +27,11 @@ export function formatVerseMessage(verse: Verse): string {
   const lines: string[] = [];
   if (verse.type === VerseType.BIBLE) {
     lines.push(`📖 *${verse.reference}*`, '', `"${verse.text}"`, '', `_${verse.reference} (${verse.translation})_`);
+  } else if (verse.type === VerseType.QURAN) {
+    // e.g. "🌙 *Quran 2:255* (Al-Baqara)"; Arabic: Tanzil Uthmani text (CC BY 3.0), verbatim.
+    lines.push(`🌙 *${verse.reference}* (${verse.book})`, '');
+    if (verse.originalText) lines.push(verse.originalText, '');
+    lines.push(verse.text, '', `_Translation: ${verse.translation}_`);
   } else {
     lines.push(`🪷 *${verse.reference}*`, '');
     if (verse.originalText) lines.push(verse.originalText.replace(/।।\s*[\d.]+\s*।।\s*$/u, '').trim(), '');

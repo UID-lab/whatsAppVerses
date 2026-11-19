@@ -140,6 +140,14 @@ export class EnvironmentVariables {
   @IsInt() @Min(1) @Max(20)
   MAX_DELIVERY_ATTEMPTS: number = 5;
 
+  /**
+   * After a message has used up its MAX_DELIVERY_ATTEMPTS, it is marked FAILED and put back in
+   * the queue automatically (every 15 minutes) up to this many times on the same day. Failures
+   * that can't succeed (e.g. number not on WhatsApp) are never auto-requeued.
+   */
+  @IsInt() @Min(0) @Max(20)
+  FAILED_REQUEUE_LIMIT: number = 3;
+
   @IsInt() @Min(1) @Max(100)
   CLAIM_BATCH_SIZE: number = 10;
 
@@ -149,6 +157,10 @@ export class EnvironmentVariables {
 
   @IsOptional() @IsString()
   INSTANCE_ID?: string;
+
+  /** Development only (console provider): fail the first N sends to each number, to test retries. */
+  @IsInt() @Min(0) @Max(100)
+  CONSOLE_FAIL_FIRST_ATTEMPTS: number = 0;
 }
 
 export function validateEnv(config: Record<string, unknown>): EnvironmentVariables {

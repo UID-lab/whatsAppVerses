@@ -10,6 +10,7 @@ import { DeliveryModule } from './delivery/delivery.module';
 import { HealthModule } from './health/health.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ReportsModule } from './reports/reports.module';
 import { SubscribersModule } from './subscribers/subscribers.module';
 import { VersesModule } from './verses/verses.module';
 
@@ -26,6 +27,7 @@ import { VersesModule } from './verses/verses.module';
     DeliveryModule,
     SubscribersModule,
     AdminModule,
+    ReportsModule,
     HealthModule,
   ],
   providers: [

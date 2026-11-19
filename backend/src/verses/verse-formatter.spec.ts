@@ -49,7 +49,27 @@ describe('formatWelcomeMessage', () => {
   });
 });
 
+const quran: Verse = {
+  ...bible,
+  id: 3,
+  type: 'QURAN',
+  reference: 'Quran 94:5',
+  book: 'Ash-Sharh',
+  chapter: 94,
+  verse: 5,
+  text: 'But lo! with hardship goeth ease,',
+  originalText: 'فَإِنَّ مَعَ ٱلْعُسْرِ يُسْرًا',
+  translation: 'Pickthall',
+};
+
 describe('formatVerseMessage', () => {
+  it('formats a Quran ayah with surah name, Arabic and translation credit', () => {
+    const text = formatVerseMessage(quran);
+    expect(text).toContain('🌙 *Quran 94:5* (Ash-Sharh)');
+    expect(text).toContain('فَإِنَّ مَعَ ٱلْعُسْرِ يُسْرًا');
+    expect(text).toContain('Translation: Pickthall');
+  });
+
   it('formats a Bible verse with an opt-out hint', () => {
     const text = formatVerseMessage(bible);
     expect(text).toContain('*John 3:16*');
