@@ -177,7 +177,7 @@ SEND_WINDOW_START=06:30
 ```
 
 Keep `SEND_WINDOW_START` at or before `DAILY_SEND_TIME`; otherwise sending waits for the window to open.
-The scheduler checks every 5 minutes, so sending starts within 5 minutes of `DAILY_SEND_TIME`. At
+The scheduler checks every minute, so sending starts at `DAILY_SEND_TIME`; each person's verse goes out within about a minute after that. At
 6 messages per minute, 100 subscribers take about 17 minutes. The welcome message is a direct
 reply and goes out at any time of day.
 

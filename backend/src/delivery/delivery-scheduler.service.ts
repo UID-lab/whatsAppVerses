@@ -11,7 +11,7 @@ const DAILY_JOB = 'daily-enqueue';
 /**
  * Cron jobs. They only *enqueue* and tidy up — sending happens in the worker.
  *
- * The daily enqueue is checked every 5 minutes rather than fired once at an exact time: if the
+ * The daily enqueue is checked every minute rather than fired once at an exact time: if the
  * process was asleep/restarting at 07:00, the next tick catches up, and the job_runs marker plus
  * the UNIQUE(subscriberId, deliveryDate) key make repeated runs harmless. With several replicas,
  * a DB lease ensures only one of them does the work.
@@ -35,7 +35,7 @@ export class DeliverySchedulerService implements OnApplicationShutdown {
     return this.config.get('APP_TIMEZONE');
   }
 
-  @Cron(CronExpression.EVERY_5_MINUTES, { name: 'daily-enqueue' })
+  @Cron(CronExpression.EVERY_MINUTE, { name: 'daily-enqueue' })
   async enqueueTick(): Promise<void> {
     await this.exclusive(async () => {
       if (localMinutesNow(this.tz) < minutesOfDay(this.config.get('DAILY_SEND_TIME'))) return;

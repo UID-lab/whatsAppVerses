@@ -3,7 +3,11 @@ import { DeliveryKind, DeliveryStatus, Prisma, SubscriberStatus } from '@prisma/
 import { randomInt } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
-const SPREAD_SECONDS = 600;
+/**
+ * Daily deliveries get a random due time within this many seconds of the send time. Only the
+ * order matters (fair when the daily cap can't reach everyone); pacing is MESSAGES_PER_MINUTE.
+ */
+const SPREAD_SECONDS = 60;
 const MAINTENANCE_CHUNK = 5000;
 
 export type ClaimedDelivery = Prisma.DeliveryGetPayload<{ include: { subscriber: true; verse: true } }>;

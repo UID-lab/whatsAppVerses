@@ -106,7 +106,7 @@ jurisdictions. Swapping in another public-domain translation means changing one 
 | No duplicates | `UNIQUE(subscriberId, deliveryDate, kind)` (at most one welcome and one daily verse per person per day) makes enqueue idempotent (cron re-runs, catch-up after downtime, several replicas). Rows go `PROCESSING → SENDING → SENT`. If a process dies **during** a send, the row becomes `UNKNOWN` and is **never retried**: a rare missed day rather than a duplicate |
 | Retries | Transient errors → `PENDING` with exponential backoff and jitter (30 s → 1 h), up to `MAX_DELIVERY_ATTEMPTS`. Permanent errors (number not on WhatsApp) → `FAILED` |
 | Crash recovery | Claims carry `lockedBy/lockedUntil`. A reaper re-queues abandoned claims every minute, and graceful shutdown hands claims back immediately |
-| Missed cron | The daily job checks every 5 min ("is it past 07:00 and not done today?"), so a restart at 07:00 doesn't skip a day |
+| Missed cron | The daily job checks every minute ("is it past the send time and not done today?"), so a restart at 07:00 doesn't skip a day |
 | Indexes | `deliveries(status, nextAttemptAt)` for claims (verified with `EXPLAIN`: range + covering index), `(status, lockedUntil)` for the reaper, `(deliveryDate, status)` for expiry/stats, `subscribers(status, id)` for enqueue, unique `phoneE164`, `confirmCode`, `manageToken`, `verses(type, rotationIndex)` |
 | Storage on a free DB | Delivery rows older than `DELIVERY_RETENTION_DAYS` (30) are purged nightly in chunks |
 
