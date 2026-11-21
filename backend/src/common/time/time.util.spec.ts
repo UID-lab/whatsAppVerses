@@ -1,4 +1,4 @@
-import { firstVerseTiming, formatClockTime, isWithinWindow, localDate, toIsoDate } from './time.util';
+import { firstVerseTiming, formatClockTime, isWithinWindow, localDate, msUntilLocalTime, toIsoDate } from './time.util';
 
 describe('time utils', () => {
   it('computes the local calendar day in Asia/Kolkata', () => {
@@ -30,5 +30,13 @@ describe('first verse timing', () => {
     expect(t('09:00')).toBe('today'); // before send time: tonight's run includes them
     expect(t('21:45')).toBe('now'); // after send time, window still open: right away
     expect(t('23:30')).toBe('tomorrow'); // window closed
+  });
+});
+
+describe('msUntilLocalTime', () => {
+  it('counts down to a later time today and is 0 once passed', () => {
+    const at = new Date('2026-11-21T11:35:30Z'); // 17:05:30 IST
+    expect(msUntilLocalTime('Asia/Kolkata', '17:08', at)).toBe(150_000);
+    expect(msUntilLocalTime('Asia/Kolkata', '17:00', at)).toBe(0);
   });
 });

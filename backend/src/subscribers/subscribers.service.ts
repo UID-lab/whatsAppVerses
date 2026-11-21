@@ -4,7 +4,8 @@ import type { CountryCode } from 'libphonenumber-js';
 import { randomBytes, randomInt } from 'node:crypto';
 import { AppConfigService } from '../config/app-config.service';
 import { maskPhone, normalizePhone } from '../common/phone/phone.util';
-import { firstVerseTiming, localDate } from '../common/time/time.util';
+import { firstVerseTiming, localDate, msUntilLocalTime } from '../common/time/time.util';
+import { DAILY_JOB } from '../delivery/delivery-scheduler.service';
 import { DeliveryRepository } from '../delivery/delivery.repository';
 import { DeliveryWorkerService } from '../delivery/delivery-worker.service';
 import { VersesService } from '../verses/verses.service';
@@ -147,8 +148,16 @@ export class SubscribersService {
     const queued = await this.deliveries.scheduleWelcome(subscriberId, today);
     const s = await this.settings.schedule();
     const timing = firstVerseTiming(tz, s.dailySendTime, s.sendWindowStart, s.sendWindowEnd);
-    if (timing === 'now') await this.deliveries.scheduleDailyNow(subscriberId, today, FIRST_VERSE_DELAY_MS);
-    if (queued || timing === 'now') this.worker.wake();
+    let verseQueued = false;
+    if (timing === 'now') {
+      verseQueued = await this.deliveries.scheduleDailyNow(subscriberId, today, FIRST_VERSE_DELAY_MS);
+    } else if (timing === 'today' && (await this.deliveries.hasJobRun(DAILY_JOB, today))) {
+      // Today's run already happened (e.g. triggered by hand, then the send time was moved
+      // later). It won't run again today, so queue this subscriber's verse for the promised time.
+      const delay = Math.max(FIRST_VERSE_DELAY_MS, msUntilLocalTime(tz, s.dailySendTime));
+      verseQueued = await this.deliveries.scheduleDailyNow(subscriberId, today, delay);
+    }
+    if (queued || verseQueued) this.worker.wake();
     return queued;
   }
 

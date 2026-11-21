@@ -7,7 +7,7 @@ import { DeliveryRepository } from './delivery.repository';
 import { SettingsService } from '../settings/settings.service';
 
 const SCHEDULER_LEASE = 'scheduler';
-const DAILY_JOB = 'daily-enqueue';
+export const DAILY_JOB = 'daily-enqueue';
 
 /**
  * Cron jobs. They only *enqueue* and tidy up — sending happens in the worker.

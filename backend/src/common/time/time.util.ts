@@ -66,6 +66,13 @@ export function jitter(base: number, spread = 0.3): number {
   return Math.round(base * (1 - spread + Math.random() * 2 * spread));
 }
 
+/** Milliseconds from `at` until the next occurrence of local `hhmm` today (0 if already passed). */
+export function msUntilLocalTime(timeZone: string, hhmm: string, at: Date = new Date()): number {
+  const p = localParts(timeZone, at);
+  const nowSeconds = p.hour * 3600 + p.minute * 60 + at.getUTCSeconds();
+  return Math.max(0, (minutesOfDay(hhmm) * 60 - nowSeconds) * 1000);
+}
+
 /** "21:30" -> "9:30 PM", "07:05" -> "7:05 AM". */
 export function formatClockTime(hhmm: string): string {
   const [h, m] = hhmm.split(':').map(Number);
