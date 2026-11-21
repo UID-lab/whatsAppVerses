@@ -6,6 +6,7 @@ import { PermanentSendError } from '../messaging/messaging.types';
 import { DailyCapReachedError, OutboundService } from '../messaging/outbound.service';
 import { SenderLeadershipService } from '../messaging/sender-leadership.service';
 import { VersesService } from '../verses/verses.service';
+import { SettingsService } from '../settings/settings.service';
 import { formatVerseMessage, formatWelcomeMessage } from '../verses/verse-formatter';
 import { retryDelayMs } from './backoff';
 import { ClaimedDelivery, DeliveryRepository } from './delivery.repository';
@@ -32,6 +33,7 @@ export class DeliveryWorkerService implements OnModuleInit {
     private readonly outbound: OutboundService,
     private readonly leadership: SenderLeadershipService,
     private readonly config: AppConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -78,11 +80,8 @@ export class DeliveryWorkerService implements OnModuleInit {
           await this.pause(CAP_REACHED_POLL_MS);
           continue;
         }
-        const inWindow = isWithinWindow(
-          this.config.get('APP_TIMEZONE'),
-          this.config.get('SEND_WINDOW_START'),
-          this.config.get('SEND_WINDOW_END'),
-        );
+        const schedule = await this.settings.schedule();
+        const inWindow = isWithinWindow(schedule.timezone, schedule.sendWindowStart, schedule.sendWindowEnd);
         const batch = await this.repo.claim(
           this.config.instanceId,
           Math.min(this.config.get('CLAIM_BATCH_SIZE'), remaining),
@@ -106,16 +105,10 @@ export class DeliveryWorkerService implements OnModuleInit {
   }
 
   /** Wording for the welcome message, matching what SubscribersService scheduled. */
-  private firstVerseText(): string {
-    const at = formatClockTime(this.config.get('DAILY_SEND_TIME'));
-    switch (
-      firstVerseTiming(
-        this.config.get('APP_TIMEZONE'),
-        this.config.get('DAILY_SEND_TIME'),
-        this.config.get('SEND_WINDOW_START'),
-        this.config.get('SEND_WINDOW_END'),
-      )
-    ) {
+  private async firstVerseText(): Promise<string> {
+    const s = await this.settings.schedule();
+    const at = formatClockTime(s.dailySendTime);
+    switch (firstVerseTiming(s.timezone, s.dailySendTime, s.sendWindowStart, s.sendWindowEnd)) {
       case 'today':
         return `today at ${at}`;
       case 'now':
@@ -144,7 +137,7 @@ export class DeliveryWorkerService implements OnModuleInit {
     }
     if (isWelcome) {
       // Greeting only; the first verse goes out with tomorrow's daily run.
-      text = formatWelcomeMessage(sub.name, this.config.get('BRAND_NAME'), this.firstVerseText());
+      text = formatWelcomeMessage(sub.name, this.config.get('BRAND_NAME'), await this.firstVerseText());
     } else {
       // A retried delivery keeps the verse it was given the first time.
       let verse = d.verse;

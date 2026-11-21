@@ -219,6 +219,7 @@ Tests: `cd backend && npm test`.
 | `GET /api/health` | DB + WhatsApp state |
 | `GET /api/admin/whatsapp` · `POST …/pairing-code` · `POST …/logout` | Linking (header `x-admin-key`) |
 | `GET /api/admin/stats` · `POST /api/admin/jobs/enqueue-today` | Operations |
+| `GET` · `PUT` · `DELETE /api/admin/settings/schedule` | View or change the daily send time and window at runtime (no restart); scheduler, welcome text and sign-up page all follow it |
 | `GET /api/admin/reports/summary?date=` | Everything at a glance: active users, the day's delivered/failed/pending counts, repeat check, verses in MySQL |
 | `GET /api/admin/reports/active-subscribers` | Currently active users (name, number, verse type, verses received/remaining, today's status) |
 | `GET /api/admin/reports/deliveries?date=` | Delivered / failed / pending, failed & successful attempts, recovered-after-failure, per kind and verse type |

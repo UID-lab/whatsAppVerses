@@ -8,6 +8,7 @@ import { firstVerseTiming, localDate } from '../common/time/time.util';
 import { DeliveryRepository } from '../delivery/delivery.repository';
 import { DeliveryWorkerService } from '../delivery/delivery-worker.service';
 import { VersesService } from '../verses/verses.service';
+import { SettingsService } from '../settings/settings.service';
 import { CreateSubscriberDto } from './dto/create-subscriber.dto';
 import { SubscriptionView } from './dto/subscription-view.dto';
 import { SubscribersRepository } from './subscribers.repository';
@@ -30,6 +31,7 @@ export class SubscribersService {
     private readonly deliveries: DeliveryRepository,
     private readonly worker: DeliveryWorkerService,
     private readonly config: AppConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -143,12 +145,8 @@ export class SubscribersService {
     const tz = this.config.get('APP_TIMEZONE');
     const today = localDate(tz);
     const queued = await this.deliveries.scheduleWelcome(subscriberId, today);
-    const timing = firstVerseTiming(
-      tz,
-      this.config.get('DAILY_SEND_TIME'),
-      this.config.get('SEND_WINDOW_START'),
-      this.config.get('SEND_WINDOW_END'),
-    );
+    const s = await this.settings.schedule();
+    const timing = firstVerseTiming(tz, s.dailySendTime, s.sendWindowStart, s.sendWindowEnd);
     if (timing === 'now') await this.deliveries.scheduleDailyNow(subscriberId, today, FIRST_VERSE_DELAY_MS);
     if (queued || timing === 'now') this.worker.wake();
     return queued;

@@ -241,3 +241,13 @@ model SendCounter {
 
   @@map("send_counters")
 }
+
+/// Settings an admin can change at runtime (no restart). Values here override the matching
+/// environment variables, e.g. key "DAILY_SEND_TIME" value "21:30".
+model AppSetting {
+  key       String   @id @db.VarChar(64)
+  value     String   @db.VarChar(255)
+  updatedAt DateTime @updatedAt @db.DateTime(3)
+
+  @@map("app_settings")
+}

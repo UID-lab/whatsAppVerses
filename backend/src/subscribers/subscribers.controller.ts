@@ -2,6 +2,8 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestj
 import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AppConfigService } from '../config/app-config.service';
+import { formatClockTime } from '../common/time/time.util';
+import { SettingsService } from '../settings/settings.service';
 import { CreateSubscriberDto } from './dto/create-subscriber.dto';
 import { ManageTokenParams } from './dto/manage-token.dto';
 import { SubscriptionView } from './dto/subscription-view.dto';
@@ -13,15 +15,18 @@ export class SubscribersController {
   constructor(
     private readonly subscribers: SubscribersService,
     private readonly config: AppConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
-  /** Static options the sign-up form needs. */
+  /** Options the sign-up form needs, including the live send time. */
   @Get('options')
-  options() {
+  async options() {
+    const schedule = await this.settings.schedule();
     return {
       optInMode: this.config.get('OPT_IN_MODE'),
       defaultRegion: this.config.get('DEFAULT_PHONE_REGION'),
-      sendTime: this.config.get('DAILY_SEND_TIME'),
+      sendTime: schedule.dailySendTime,
+      sendTimeLabel: formatClockTime(schedule.dailySendTime),
       timezone: this.config.get('APP_TIMEZONE'),
       verseTypes: [
         { id: 'BIBLE', label: 'Bible verses', description: 'King James Version' },

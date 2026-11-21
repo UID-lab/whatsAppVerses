@@ -72,7 +72,7 @@ export function SubscribePage() {
         <form onSubmit={submitPhone} noValidate>
           <h1>A verse for you every Morning </h1>
           <p className="lead">
-            Get one Bible, Bhagavad Gita or Quran verse every day{options ? ` at ${options.sendTime}` : ''}. Free, no app, unsubscribe anytime.
+            Get one Bible, Bhagavad Gita or Quran verse every day{options ? ` at ${options.sendTimeLabel ?? options.sendTime}` : ''}. Free, no app, unsubscribe anytime.
           </p>
           <label htmlFor="name">Your name</label>
           <input

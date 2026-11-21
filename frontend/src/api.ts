@@ -14,6 +14,7 @@ export interface Options {
   optInMode: 'whatsapp_confirm' | 'direct';
   defaultRegion: string;
   sendTime: string;
+  sendTimeLabel: string;
   timezone: string;
   verseTypes: { id: VerseType; label: string; description: string }[];
 }
@@ -63,8 +64,22 @@ export const api = {
     logout: (adminKey: string) => request<{ ok: boolean }>('/admin/whatsapp/logout', { method: 'POST', adminKey }),
     enqueueToday: (adminKey: string) =>
       request<{ enqueued: number }>('/admin/jobs/enqueue-today', { method: 'POST', adminKey }),
+    schedule: (adminKey: string) => request<AdminSchedule>('/admin/settings/schedule', { adminKey }),
+    updateSchedule: (adminKey: string, body: Partial<Pick<AdminSchedule, 'dailySendTime' | 'sendWindowStart' | 'sendWindowEnd'>>) =>
+      request<AdminSchedule>('/admin/settings/schedule', { method: 'PUT', adminKey, body: JSON.stringify(body) }),
   },
 };
+
+export interface AdminSchedule {
+  dailySendTime: string;
+  dailySendTimeLabel: string;
+  sendWindowStart: string;
+  sendWindowEnd: string;
+  timezone: string;
+  source: 'database' | 'env';
+  todaysRunDone: boolean;
+  nextRun: string;
+}
 
 export interface AdminWhatsApp {
   provider: string;

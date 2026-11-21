@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { AdminStats, AdminWhatsApp, api, ApiError } from '../api';
+import { AdminSchedule, AdminStats, AdminWhatsApp, api, ApiError } from '../api';
 
 const KEY_STORAGE = 'verse-admin-key';
 
@@ -17,15 +17,19 @@ export function AdminPage() {
   const [draft, setDraft] = useState('');
   const [wa, setWa] = useState<AdminWhatsApp>();
   const [stats, setStats] = useState<AdminStats>();
+  const [schedule, setSchedule] = useState<AdminSchedule>();
+  const [sendTimeDraft, setSendTimeDraft] = useState('');
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
   const refresh = useCallback(async () => {
     if (!key) return;
     try {
-      const [w, s] = await Promise.all([api.admin.whatsapp(key), api.admin.stats(key)]);
+      const [w, s, sch] = await Promise.all([api.admin.whatsapp(key), api.admin.stats(key), api.admin.schedule(key)]);
       setWa(w);
       setStats(s);
+      setSchedule(sch);
+      setSendTimeDraft((d) => d || sch.dailySendTime);
       setError(undefined);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -125,6 +129,40 @@ export function AdminPage() {
               </button>
             )}
           </div>
+        </>
+      )}
+
+      {schedule && (
+        <>
+          <h2>Daily send time</h2>
+          <form
+            className="row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void run(async () => {
+                const s = await api.admin.updateSchedule(key, { dailySendTime: sendTimeDraft });
+                setSchedule(s);
+                return `Send time set to ${s.dailySendTimeLabel}. ${s.nextRun}`;
+              });
+            }}
+          >
+            <input
+              type="time"
+              value={sendTimeDraft}
+              onChange={(e) => setSendTimeDraft(e.target.value)}
+              aria-label="Daily send time"
+              style={{ width: 'auto' }}
+              required
+            />
+            <button className="secondary" type="submit" disabled={!sendTimeDraft || sendTimeDraft === schedule.dailySendTime}>
+              Save
+            </button>
+          </form>
+          <p className="help">
+            Now: <b>{schedule.dailySendTimeLabel}</b> ({schedule.timezone}) · window {schedule.sendWindowStart}–{schedule.sendWindowEnd}
+            {' · '}
+            {schedule.nextRun} Applies immediately to the scheduler, welcome messages and the sign-up page; no restart needed.
+          </p>
         </>
       )}
 

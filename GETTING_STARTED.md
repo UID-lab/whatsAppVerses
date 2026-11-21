@@ -179,28 +179,38 @@ a day). Numbers that aren't on WhatsApp are not retried automatically.
 
 ## Configure the daily send time
 
-All in `backend/.env` (24-hour `HH:MM`, in `APP_TIMEZONE`, India time by default). Restart the
-backend after changing.
+**Change it while the app is running. No restart is needed.** Any of these works:
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `DAILY_SEND_TIME` | `07:00` | When the day's verses start going out |
-| `SEND_WINDOW_START` | `07:00` | Daily verses are never sent before this… |
-| `SEND_WINDOW_END` | `21:30` | …or after this (late ones wait for tomorrow) |
-| `APP_TIMEZONE` | `Asia/Kolkata` | Time zone for all of the above |
-| `MESSAGES_PER_MINUTE` | `6` | Sending pace (keep it low on a personal number) |
+- **Admin page:** http://localhost:5173/admin → **Daily send time** → pick a time → **Save**.
+- **Swagger:** http://localhost:3000/api/docs → `PUT /api/admin/settings/schedule` →
+  `{"dailySendTime": "21:30"}`.
+- **Terminal:**
+  ```bash
+  cd ~/Desktop/verse-whatsapp/backend && KEY=$(grep ^ADMIN_API_KEY .env | cut -d= -f2) && curl -s -X PUT localhost:3000/api/admin/settings/schedule -H "x-admin-key: $KEY" -H 'content-type: application/json' -d '{"dailySendTime":"21:30"}'; echo
+  ```
 
-Example, to send at 6:30 AM:
+The new time is stored in the database (`app_settings` table) and used within a few seconds by
+**everything**: the scheduler, the welcome message ("…your first verse will arrive today at
+9:30 PM") and the sign-up page ("…every day at 9:30 PM"). They always show the same time.
 
-```
-DAILY_SEND_TIME=06:30
-SEND_WINDOW_START=06:30
-```
+- Each subscriber still gets one verse per day. If today's run already happened, the new time
+  applies from tomorrow. The response's `nextRun` says which.
+- `GET /api/admin/settings/schedule` shows the current time. `DELETE` goes back to `.env`.
+- The send time must be inside the send window (default 07:00–23:00). Change the window in the
+  same request if needed: `{"dailySendTime":"06:30","sendWindowStart":"06:00"}`.
 
-Keep `SEND_WINDOW_START` at or before `DAILY_SEND_TIME`; otherwise sending waits for the window to open.
-The scheduler checks every minute, so sending starts at `DAILY_SEND_TIME`; each person's verse goes out within about a minute after that. At
-6 messages per minute, 100 subscribers take about 17 minutes. The welcome message is a direct
-reply and goes out at any time of day.
+The values in `backend/.env` (`DAILY_SEND_TIME`, `SEND_WINDOW_START`, `SEND_WINDOW_END`) are only
+the defaults used until a time is saved this way.
+
+| Setting | Meaning |
+|---|---|
+| Daily send time | When the day's verses start going out (24-hour, `APP_TIMEZONE`, India time by default) |
+| Send window | Daily verses are only sent between these times; late ones wait for the next day |
+| `MESSAGES_PER_MINUTE` (`.env`) | Sending pace (keep it low on a personal number) |
+
+The scheduler checks every minute, so sending starts at the send time, and each person's verse
+goes out within about a minute after that. At 6 messages per minute, 100 subscribers take about
+17 minutes. The welcome message is a direct reply and goes out at any time of day.
 
 ---
 

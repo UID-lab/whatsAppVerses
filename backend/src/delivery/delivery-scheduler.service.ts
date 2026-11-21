@@ -4,6 +4,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { LeaseService } from '../coordination/lease.service';
 import { localDate, localMinutesNow, minutesOfDay, toIsoDate } from '../common/time/time.util';
 import { DeliveryRepository } from './delivery.repository';
+import { SettingsService } from '../settings/settings.service';
 
 const SCHEDULER_LEASE = 'scheduler';
 const DAILY_JOB = 'daily-enqueue';
@@ -19,12 +20,14 @@ const DAILY_JOB = 'daily-enqueue';
 @Injectable()
 export class DeliverySchedulerService implements OnApplicationShutdown {
   private readonly logger = new Logger(DeliverySchedulerService.name);
-  private busy = false;
+  /** Jobs currently running on this replica (each job is guarded separately). */
+  private readonly running = new Set<string>();
 
   constructor(
     private readonly repo: DeliveryRepository,
     private readonly lease: LeaseService,
     private readonly config: AppConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   async onApplicationShutdown(): Promise<void> {
@@ -37,8 +40,9 @@ export class DeliverySchedulerService implements OnApplicationShutdown {
 
   @Cron(CronExpression.EVERY_MINUTE, { name: 'daily-enqueue' })
   async enqueueTick(): Promise<void> {
-    await this.exclusive(async () => {
-      if (localMinutesNow(this.tz) < minutesOfDay(this.config.get('DAILY_SEND_TIME'))) return;
+    await this.exclusive('daily-enqueue', async () => {
+      const { dailySendTime } = await this.settings.schedule();
+      if (localMinutesNow(this.tz) < minutesOfDay(dailySendTime)) return;
       const today = localDate(this.tz);
       if (await this.repo.hasJobRun(DAILY_JOB, today)) return;
       await this.enqueueFor(today);
@@ -56,7 +60,7 @@ export class DeliverySchedulerService implements OnApplicationShutdown {
 
   @Cron(CronExpression.EVERY_MINUTE, { name: 'reap-stale' })
   async reapTick(): Promise<void> {
-    await this.exclusive(async () => {
+    await this.exclusive('reap-stale', async () => {
       const { requeued, unknown } = await this.repo.reapStale();
       if (requeued || unknown) this.logger.warn(`Reaper: ${requeued} requeued, ${unknown} marked UNKNOWN`);
     });
@@ -65,7 +69,7 @@ export class DeliverySchedulerService implements OnApplicationShutdown {
   /** Failed messages are re-run automatically until they're delivered (see FAILED_REQUEUE_LIMIT). */
   @Cron(CronExpression.EVERY_10_MINUTES, { name: 'requeue-failed' })
   async requeueTick(): Promise<void> {
-    await this.exclusive(async () => {
+    await this.exclusive('requeue-failed', async () => {
       const n = await this.repo.requeueFailed({
         date: localDate(this.tz),
         maxRequeues: this.config.get('FAILED_REQUEUE_LIMIT'),
@@ -76,7 +80,7 @@ export class DeliverySchedulerService implements OnApplicationShutdown {
 
   @Cron(CronExpression.EVERY_30_MINUTES, { name: 'expire-old' })
   async expireTick(): Promise<void> {
-    await this.exclusive(async () => {
+    await this.exclusive('expire-old', async () => {
       const n = await this.repo.expireBefore(localDate(this.tz));
       if (n) this.logger.warn(`Expired ${n} deliveries from previous days (capacity or downtime)`);
     });
@@ -84,24 +88,27 @@ export class DeliverySchedulerService implements OnApplicationShutdown {
 
   @Cron('17 3 * * *', { name: 'purge-old' })
   async purgeTick(): Promise<void> {
-    await this.exclusive(async () => {
+    await this.exclusive('purge-old', async () => {
       const cutoff = new Date(localDate(this.tz).getTime() - this.config.get('DELIVERY_RETENTION_DAYS') * 86_400_000);
       const n = await this.repo.purgeBefore(cutoff);
       if (n) this.logger.log(`Purged ${n} deliveries older than ${toIsoDate(cutoff)}`);
     });
   }
 
-  /** Run on one replica at a time, and never overlap with a previous tick on this replica. */
-  private async exclusive(fn: () => Promise<void>): Promise<void> {
-    if (!this.config.runsScheduler || this.busy) return;
-    this.busy = true;
+  /**
+   * Run on one replica at a time (DB lease), and never overlap with a previous tick of the SAME
+   * job on this replica. Different jobs may run at the same moment (several fire every minute).
+   */
+  private async exclusive(job: string, fn: () => Promise<void>): Promise<void> {
+    if (!this.config.runsScheduler || this.running.has(job)) return;
+    this.running.add(job);
     try {
       if (!(await this.lease.tryAcquire(SCHEDULER_LEASE, 120))) return;
       await fn();
     } catch (err) {
       this.logger.error(`Scheduled job failed: ${(err as Error).message}`, (err as Error).stack);
     } finally {
-      this.busy = false;
+      this.running.delete(job);
     }
   }
 }
