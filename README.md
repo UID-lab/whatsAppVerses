@@ -6,6 +6,7 @@ get a personal welcome message right away, and then one verse every day (from th
 MySQL, with no per-message API costs.
 
 > **New here? Follow [GETTING_STARTED.md](GETTING_STARTED.md)** for step-by-step setup on a Mac.
+> **Going live? Follow [DEPLOY.md](DEPLOY.md)**: free Oracle Cloud server + DuckDNS + Caddy (automatic HTTPS), at https://versesforjoy.duckdns.org.
 
 ```
  React (Vite) ──► NestJS API ──► MySQL ◄── cron: enqueue daily deliveries (idempotent, batched)

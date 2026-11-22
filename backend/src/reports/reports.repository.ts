@@ -80,8 +80,9 @@ export class ReportsRepository {
   }
 
   async versesInDatabase() {
-    const rows = await this.prisma.$queryRaw<{ type: VerseType; stored: bigint; inRotation: bigint; translation: string }[]>`
-      SELECT type, COUNT(*) AS stored, COUNT(rotationIndex) AS inRotation, MIN(translation) AS translation
+    // Note: "stored" is a reserved word in MySQL 8, so the alias is storedCount.
+    const rows = await this.prisma.$queryRaw<{ type: VerseType; storedCount: bigint; inRotation: bigint; translation: string }[]>`
+      SELECT type, COUNT(*) AS storedCount, COUNT(rotationIndex) AS inRotation, MIN(translation) AS translation
       FROM verses GROUP BY type`;
     return rows;
   }

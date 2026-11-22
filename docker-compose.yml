@@ -1,7 +1,9 @@
-# Everything on one machine (e.g. an Oracle Cloud Always Free VM):
+# Everything on one machine (e.g. an Oracle Cloud Always Free VM). See DEPLOY.md.
 #   cp .env.example .env   # then edit ADMIN_API_KEY, passwords, PUBLIC_WEB_URL
 #   docker compose up -d --build
-# Web UI: http://<host>:8080   Admin: http://<host>:8080/admin
+# The site listens on 127.0.0.1:8080 (server only). Public HTTPS comes from Caddy
+# (docker-compose.https.yml, e.g. https://versesforjoy.duckdns.org) or a Cloudflare Tunnel.
+# Set WEB_BIND=0.0.0.0 only if you really want the port public.
 services:
   mysql:
     image: mysql:8.4
@@ -48,7 +50,7 @@ services:
     depends_on:
       - backend
     ports:
-      - '${WEB_PORT:-8080}:80'
+      - '${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80'
 
 volumes:
   mysql-data:

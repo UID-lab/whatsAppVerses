@@ -1,0 +1,26 @@
+# Adds Caddy as the public HTTPS entry point (ports 80 and 443) with automatic free
+# Let's Encrypt certificates. Use it on a server that has a public IP and a (sub)domain
+# pointing at it, e.g. a free DuckDNS name. See DEPLOY.md.
+#
+# Enable it by adding this line to .env (then plain `docker compose …` includes it):
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?set SITE_DOMAIN in .env, e.g. versesforjoy.duckdns.org}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

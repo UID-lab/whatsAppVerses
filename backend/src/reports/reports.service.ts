@@ -122,7 +122,7 @@ export class ReportsService {
   async versesInDatabase(): Promise<Record<VerseType, VerseCountDto>> {
     const out = {} as Record<VerseType, VerseCountDto>;
     for (const r of await this.repo.versesInDatabase()) {
-      out[r.type] = { stored: Number(r.stored), inRotation: Number(r.inRotation), translation: r.translation };
+      out[r.type] = { stored: Number(r.storedCount), inRotation: Number(r.inRotation), translation: r.translation };
     }
     return out;
   }
