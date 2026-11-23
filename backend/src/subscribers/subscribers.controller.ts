@@ -30,7 +30,7 @@ export class SubscribersController {
       timezone: this.config.get('APP_TIMEZONE'),
       verseTypes: [
         { id: 'BIBLE', label: 'Bible verses', description: 'King James Version' },
-        { id: 'GITA', label: 'Bhagavad Gita verses', description: 'Sanskrit with English translation' },
+        { id: 'GITA', label: 'Bhagavad Gita verses', description: 'English translation' },
         { id: 'QURAN', label: 'Quran verses', description: 'Arabic with English translation (Pickthall)' },
       ],
     };

@@ -77,10 +77,12 @@ describe('formatVerseMessage', () => {
     expect(text).toContain('Reply *STOP* to unsubscribe.');
   });
 
-  it('formats a Gita verse with Sanskrit and translation credit', () => {
+  it('formats a Gita verse in English only (no Sanskrit, no translator line)', () => {
     const text = formatVerseMessage(gita);
-    expect(text).toContain('कर्मण्येवाधिकारस्ते मा फलेषु कदाचन');
-    expect(text).not.toContain('2.47।।');
-    expect(text).toContain('Translation: Shri Purohit Swami');
+    expect(text).toContain('🪷 *');
+    expect(text).toContain(gita.text);
+    expect(text).not.toMatch(/[\u0900-\u097F]/u); // no Devanagari
+    expect(text).not.toContain('Translation:');
+    expect(text).not.toContain('Purohit');
   });
 });

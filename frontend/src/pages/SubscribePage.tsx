@@ -70,9 +70,12 @@ export function SubscribePage() {
       <Progress step={step} withConfirm={options?.optInMode === 'whatsapp_confirm'} />
       {step === 'phone' && (
         <form onSubmit={submitPhone} noValidate>
-          <h1>A verse for you every Morning </h1>
+          <h1 className="hero-title">
+            Daily Verse to walk in the <span className="gradient-text">Joyful Path</span>{' '}
+            <span aria-hidden>🤩</span>
+          </h1>
           <p className="lead">
-            Get one Bible, Bhagavad Gita or Quran verse every day{options ? ` at ${options.sendTimeLabel ?? options.sendTime}` : ''}. Free, no app, unsubscribe anytime.
+            Get one Bible, Bhagavad Gita or Quran verse every day{options ? ` at ${options.sendTimeLabel ?? options.sendTime}` : ''}.
           </p>
           <label htmlFor="name">Your name</label>
           <input
@@ -147,7 +150,7 @@ export function SubscribePage() {
 
 const defaultTypes: Options['verseTypes'] = [
   { id: 'BIBLE', label: 'Bible verses', description: 'King James Version' },
-  { id: 'GITA', label: 'Bhagavad Gita verses', description: 'Sanskrit with English translation' },
+  { id: 'GITA', label: 'Bhagavad Gita verses', description: 'English translation' },
   { id: 'QURAN', label: 'Quran verses', description: 'Arabic with English translation (Pickthall)' },
 ];
 

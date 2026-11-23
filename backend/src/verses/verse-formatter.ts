@@ -33,9 +33,9 @@ export function formatVerseMessage(verse: Verse): string {
     if (verse.originalText) lines.push(verse.originalText, '');
     lines.push(verse.text, '', `_Translation: ${verse.translation}_`);
   } else {
-    lines.push(`🪷 *${verse.reference}*`, '');
-    if (verse.originalText) lines.push(verse.originalText.replace(/।।\s*[\d.]+\s*।।\s*$/u, '').trim(), '');
-    lines.push(verse.text, '', `_Translation: ${verse.translation}_`);
+    // English only: no Sanskrit and no translator line (the translation is public domain;
+    // credit is kept in README.md).
+    lines.push(`🪷 *${verse.reference}*`, '', verse.text);
   }
   lines.push('', 'Reply *STOP* to unsubscribe.');
   return lines.join('\n');
