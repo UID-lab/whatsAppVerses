@@ -17,6 +17,7 @@ import {
   VerseCountDto,
 } from './dto/report-responses.dto';
 import { ReportsRepository } from './reports.repository';
+import { zeroByVerseType } from '../verses/verse-types';
 
 const PENDING_STATUSES: DeliveryStatus[] = ['PENDING', 'PROCESSING', 'SENDING'];
 
@@ -78,7 +79,7 @@ export class ReportsService {
       pending: count(kind, PENDING_STATUSES),
     });
     const attemptsOf = (o: string) => Number(attempts.find((a) => a.outcome === o)?.n ?? 0);
-    const dailyDeliveredByVerseType = { BIBLE: 0, GITA: 0, QURAN: 0 } as Record<VerseType, number>;
+    const dailyDeliveredByVerseType = zeroByVerseType();
     for (const r of dailyByType) dailyDeliveredByVerseType[r.type] = Number(r.n);
     return {
       date: toIsoDate(day),
@@ -171,12 +172,9 @@ export class ReportsService {
   }
 
   private async poolSizes(): Promise<Record<VerseType, number>> {
-    const [BIBLE, GITA, QURAN] = await Promise.all([
-      this.verses.poolSize('BIBLE'),
-      this.verses.poolSize('GITA'),
-      this.verses.poolSize('QURAN'),
-    ]);
-    return { BIBLE, GITA, QURAN };
+    const types = Object.values(VerseType);
+    const sizes = await Promise.all(types.map((t) => this.verses.poolSize(t)));
+    return Object.fromEntries(types.map((t, i) => [t, sizes[i]])) as Record<VerseType, number>;
   }
 
   private toDeliveryDto(

@@ -160,7 +160,7 @@ Run on the server (the `ssh ubuntu@…` session).
    ```
    Expect `certificate obtained successfully`. Then open **https://versesforjoy.duckdns.org**:
    the sign-up page should load with a padlock. On first start the backend applies the
-   migrations and loads all verses (Bible, Gita, Quran) into MySQL.
+   migrations and loads all verses (Bible, Ramayana, Mahabharata, Quran) into MySQL.
 
 ---
 

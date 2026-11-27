@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { IsIn, IsNotEmpty, IsString, Length, Matches, MaxLength } from 'class-validator';
 import { VerseType } from '@prisma/client';
+import { OFFERED_VERSE_TYPES } from '../../verses/verse-types';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateSubscriberDto {
@@ -21,7 +22,7 @@ export class CreateSubscriberDto {
   @ApiProperty({ example: '8861286408', description: 'Any format; India (+91) assumed without a country code' })
   phone: string;
 
-  @IsEnum(VerseType, { message: 'verseType must be BIBLE, GITA or QURAN' })
-  @ApiProperty({ enum: VerseType, example: 'BIBLE' })
+  @IsIn(OFFERED_VERSE_TYPES, { message: `verseType must be one of ${OFFERED_VERSE_TYPES.join(', ')}` })
+  @ApiProperty({ enum: OFFERED_VERSE_TYPES, example: 'RAMAYANA' })
   verseType: VerseType;
 }

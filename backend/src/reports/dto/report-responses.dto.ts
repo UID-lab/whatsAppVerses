@@ -18,7 +18,7 @@ export class ActiveSubscriberDto {
 
 export class ActiveSubscribersDto {
   @ApiProperty({ description: 'Total ACTIVE subscribers (matching the filter)' }) total: number;
-  @ApiProperty({ example: { BIBLE: 3, GITA: 2, QURAN: 1 } }) byVerseType: Record<VerseType, number>;
+  @ApiProperty({ example: { BIBLE: 3, RAMAYANA: 2, MAHABHARATA: 2, QURAN: 1 } }) byVerseType: Record<VerseType, number>;
   @ApiProperty({ type: [ActiveSubscriberDto] }) items: ActiveSubscriberDto[];
 }
 
@@ -45,7 +45,7 @@ export class DeliveryReportDto {
   @ApiProperty({ description: 'Failed send attempts (each retry counts)' }) failedAttempts: number;
   @ApiProperty({ type: KindCountsDto }) welcome: KindCountsDto;
   @ApiProperty({ type: KindCountsDto }) daily: KindCountsDto;
-  @ApiProperty({ example: { BIBLE: 3, GITA: 1, QURAN: 1 }, description: 'Daily verses delivered, per type' })
+  @ApiProperty({ example: { BIBLE: 3, RAMAYANA: 1, MAHABHARATA: 1, QURAN: 1 }, description: 'Daily verses delivered, per type' })
   dailyDeliveredByVerseType: Record<VerseType, number>;
 }
 
@@ -75,7 +75,7 @@ export class VerseCountDto {
 export class SummaryDto {
   @ApiProperty({ example: '2026-11-19' }) date: string;
   @ApiProperty() activeSubscribers: number;
-  @ApiProperty({ example: { BIBLE: 3, GITA: 2, QURAN: 1 } }) activeByVerseType: Record<VerseType, number>;
+  @ApiProperty({ example: { BIBLE: 3, RAMAYANA: 2, MAHABHARATA: 2, QURAN: 1 } }) activeByVerseType: Record<VerseType, number>;
   @ApiProperty({ type: DeliveryReportDto }) deliveries: DeliveryReportDto;
   @ApiProperty({ type: RepeatReportDto }) repeats: RepeatReportDto;
   @ApiProperty({ type: Object, example: { BIBLE: { stored: 31102, inRotation: 10891, translation: 'KJV' } } })

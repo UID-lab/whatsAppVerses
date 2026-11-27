@@ -68,3 +68,31 @@ describe('VersesService.nextVerse', () => {
     expect((await service.nextVerse(sub(0, 0)))!.id).toBe(first.id);
   });
 });
+
+describe('Ramayana (read in order)', () => {
+  it('starts every subscriber at part 1', async () => {
+    const { repo } = fakeRepo([{ tier: 1, start: 0, size: 50 }]);
+    const service = new VersesService(repo);
+    for (let i = 0; i < 10; i++) expect(await service.randomOffset('RAMAYANA')).toBe(0);
+  });
+
+  it('delivers the parts in reading order, and resends a released part before moving on', async () => {
+    const { repo } = fakeRepo([{ tier: 1, start: 0, size: 6 }]);
+    const service = new VersesService(repo);
+    const reader = (progress: number) => ({ id: 7, verseType: 'RAMAYANA' as VerseType, rotationOffset: 0, progress });
+    const order: number[] = [];
+    let progress = 0;
+    for (let day = 0; day < 6; day++) {
+      const v = (await service.nextVerse(reader(progress)))!;
+      if (day === 2 && order.length === 2) {
+        // part 3 failed permanently: it is released and progress does not advance
+        await service.release(7, v.id);
+        const again = (await service.nextVerse(reader(progress)))!;
+        expect(again.id).toBe(v.id);
+      }
+      order.push(v.rotationIndex!);
+      progress++;
+    }
+    expect(order).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+});

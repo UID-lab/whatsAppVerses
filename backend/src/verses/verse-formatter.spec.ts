@@ -11,6 +11,7 @@ const bible: Verse = {
   text: 'For God so loved the world…',
   originalText: null,
   transliteration: null,
+  chapterTitle: null,
   translation: 'KJV',
   rotationIndex: 0,
   rotationTier: 1,
@@ -27,6 +28,34 @@ const gita: Verse = {
   text: 'You have the right to work, but never to the fruit of work.',
   originalText: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।।2.47।।',
   translation: 'Shri Purohit Swami',
+};
+
+const ramayana: Verse = {
+  ...bible,
+  id: 4,
+  type: 'RAMAYANA',
+  reference: 'Ramayana 2.21.3',
+  book: 'Ayodhya Kanda',
+  chapter: 21,
+  verse: 3,
+  chapterTitle: 'Kaikeyí’s Request',
+  text: 'Truth, only truth protects the land,\nBy truth unharmed our houses stand;',
+  originalText: null,
+  translation: 'Ralph T. H. Griffith',
+  rotationIndex: 213,
+};
+
+const mahabharata: Verse = {
+  ...bible,
+  id: 5,
+  type: 'MAHABHARATA',
+  reference: 'Mahabharata · Udyoga Parva, Section 35',
+  book: 'Udyoga Parva',
+  chapter: 35,
+  verse: 1,
+  text: 'Prosperity taketh its birth in good deeds, groweth in consequence of activity.',
+  originalText: null,
+  translation: 'Kisari Mohan Ganguli',
 };
 
 describe('formatWelcomeMessage', () => {
@@ -75,6 +104,28 @@ describe('formatVerseMessage', () => {
     expect(text).toContain('*John 3:16*');
     expect(text).toContain('"For God so loved the world…"');
     expect(text).toContain('Reply *STOP* to unsubscribe.');
+  });
+
+  it('formats a Ramayana part with part number, kanda, canto title and a continuation line', () => {
+    const text = formatVerseMessage(ramayana);
+    expect(text.startsWith('🏹 *Ramayana · Part 214*\n_Ayodhya Kanda · Canto 21 · Kaikeyí’s Request_\n\n')).toBe(true);
+    expect(text).toContain('Truth, only truth protects the land,\nBy truth unharmed our houses stand;');
+    expect(text).toContain('_To be continued tomorrow…_');
+    expect(text).not.toContain('Translation:');
+    expect(text).toContain('Reply *STOP* to unsubscribe.');
+  });
+
+  it('ends the story on the last Ramayana part', () => {
+    const text = formatVerseMessage(ramayana, { poolSize: 214 });
+    expect(text).toContain('_The end of the Ramayana. 🙏_');
+    expect(text).not.toContain('To be continued');
+  });
+
+  it('formats a Mahabharata passage with parva and section', () => {
+    const text = formatVerseMessage(mahabharata);
+    expect(text.startsWith('🐚 *Mahabharata · Udyoga Parva, Section 35*\n\n')).toBe(true);
+    expect(text).toContain(mahabharata.text);
+    expect(text).not.toContain('Ganguli');
   });
 
   it('formats a Gita verse in English only (no Sanskrit, no translator line)', () => {

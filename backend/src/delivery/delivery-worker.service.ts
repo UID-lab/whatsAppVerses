@@ -161,7 +161,7 @@ export class DeliveryWorkerService implements OnModuleInit {
         await this.repo.assignVerse(d.id, verse.id);
       }
       verseId = verse.id;
-      text = formatVerseMessage(verse);
+      text = formatVerseMessage(verse, { poolSize: await this.verses.poolSize(verse.type) });
     }
 
     const attemptId = await this.repo.markSending(d.id, this.config.instanceId);

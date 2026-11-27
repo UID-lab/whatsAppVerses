@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Verse, VerseType } from '@prisma/client';
 import { randomInt } from 'node:crypto';
 import { TierRange, VersesRepository } from './verses.repository';
+import { isInOrder } from './verse-types';
 
 const TIER_CACHE_MS = 10 * 60_000;
 // A failed reservation means a concurrent call for the same subscriber just won that verse, so
@@ -13,8 +14,8 @@ type SubscriberRef = { id: number; verseType: VerseType; rotationOffset: number;
 /**
  * Verse selection with a hard no-repeat guarantee.
  *
- *  - The seed orders verses into tiers: tier 1 (420 curated Bible verses / Gita chapters 2–18)
- *    then tier 2 (~10,000 more stand-alone Bible verses / Gita chapter 1), each a fixed shuffle.
+ *  - The seed orders verses into tiers: tier 1 (curated verses / best-scoring passages), then
+ *    tier 2 (more stand-alone verses / passages), each a fixed shuffle.
  *  - Each subscriber starts at a random point (rotationOffset) inside each tier and walks forward,
  *    so different people get different verses on the same day.
  *  - Every verse handed out is recorded in subscriber_verses (PRIMARY KEY subscriberId+verseId).
@@ -42,8 +43,12 @@ export class VersesService {
     return (await this.tierRanges(type)).reduce((sum, t) => sum + t.size, 0);
   }
 
-  /** Random start position for a new subscriber (applied modulo each tier's size). */
+  /**
+   * Start position for a new subscriber (applied modulo each tier's size): random, so people get
+   * different verses on the same day; 0 for types read in order (the Ramayana starts at part 1).
+   */
   async randomOffset(type: VerseType): Promise<number> {
+    if (isInOrder(type)) return 0;
     const first = (await this.tierRanges(type))[0];
     return first && first.size > 0 ? randomInt(first.size) : 0;
   }

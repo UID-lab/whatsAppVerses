@@ -5,8 +5,26 @@ import { QrImage } from '../components/QrImage';
 
 type Step = 'phone' | 'type' | 'confirm' | 'done';
 
-const VERSE_ICONS: Record<VerseType, string> = { BIBLE: '📖', GITA: '🪷', QURAN: '🌙' };
-const VERSE_NAMES: Record<VerseType, string> = { BIBLE: 'Bible', GITA: 'Bhagavad Gita', QURAN: 'Quran' };
+const VERSE_ICONS: Record<VerseType, string> = { BIBLE: '📖', RAMAYANA: '🏹', MAHABHARATA: '🐚', QURAN: '🌙', GITA: '🪷' };
+const VERSE_NAMES: Record<VerseType, string> = {
+  BIBLE: 'Bible',
+  RAMAYANA: 'Ramayana',
+  MAHABHARATA: 'Mahabharata',
+  QURAN: 'Quran',
+  GITA: 'Bhagavad Gita',
+};
+
+type VerseOption = Options['verseTypes'][number];
+/** Consecutive options with the same `group` become one block (e.g. Ramayana | Mahabharata). */
+function groupOptions(options: VerseOption[]): { group?: string; items: VerseOption[] }[] {
+  const out: { group?: string; items: VerseOption[] }[] = [];
+  for (const o of options) {
+    const last = out[out.length - 1];
+    if (o.group && last?.group === o.group) last.items.push(o);
+    else out.push({ group: o.group, items: [o] });
+  }
+  return out;
+}
 
 export function SubscribePage() {
   const [step, setStep] = useState<Step>('phone');
@@ -75,7 +93,7 @@ export function SubscribePage() {
             <span aria-hidden>🤩</span>
           </h1>
           <p className="lead">
-            Get one Bible, Bhagavad Gita or Quran verse every day{options ? ` at ${options.sendTimeLabel ?? options.sendTime}` : ''}.
+            Get one Bible, Ramayana, Mahabharata or Quran verse every day{options ? ` at ${options.sendTimeLabel ?? options.sendTime}` : ''}.
           </p>
           <label htmlFor="name">Your name</label>
           <input
@@ -124,16 +142,42 @@ export function SubscribePage() {
             </button>
           </p>
           <div className="choices">
-            {(options?.verseTypes ?? defaultTypes).map((t) => (
-              <button key={t.id} className="choice" disabled={busy} onClick={() => choose(t.id)} aria-busy={busy && verseType === t.id}>
-                <span className="choice-icon" aria-hidden>
-                  {VERSE_ICONS[t.id]}
-                </span>
-                <span className="choice-title">{t.label}</span>
-                <span className="choice-desc">{t.description}</span>
-                {busy && verseType === t.id && <span className="spinner" aria-label="Saving" />}
-              </button>
-            ))}
+            {groupOptions(options?.verseTypes ?? defaultTypes).map((g) =>
+              g.group ? (
+                <div key={g.group} className="choice-group" role="group" aria-label={g.group}>
+                  <div className="choice-group-title">{g.group}</div>
+                  <div className="choice-split">
+                    {g.items.map((t) => (
+                      <button
+                        key={t.id}
+                        className="choice choice-half"
+                        disabled={busy}
+                        onClick={() => choose(t.id)}
+                        aria-busy={busy && verseType === t.id}
+                      >
+                        <span className="choice-icon" aria-hidden>
+                          {VERSE_ICONS[t.id]}
+                        </span>
+                        <span className="choice-title">{t.label}</span>
+                        <span className="choice-desc">{t.description}</span>
+                        {busy && verseType === t.id && <span className="spinner" aria-label="Saving" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                g.items.map((t) => (
+                  <button key={t.id} className="choice" disabled={busy} onClick={() => choose(t.id)} aria-busy={busy && verseType === t.id}>
+                    <span className="choice-icon" aria-hidden>
+                      {VERSE_ICONS[t.id]}
+                    </span>
+                    <span className="choice-title">{t.label}</span>
+                    <span className="choice-desc">{t.description}</span>
+                    {busy && verseType === t.id && <span className="spinner" aria-label="Saving" />}
+                  </button>
+                ))
+              ),
+            )}
           </div>
           {error && <p className="error" role="alert">{error}</p>}
         </section>
@@ -150,7 +194,8 @@ export function SubscribePage() {
 
 const defaultTypes: Options['verseTypes'] = [
   { id: 'BIBLE', label: 'Bible verses', description: 'King James Version' },
-  { id: 'GITA', label: 'Bhagavad Gita verses', description: 'English translation' },
+  { id: 'RAMAYANA', label: 'Ramayana', description: 'The full story, a part a day', group: 'Indian epics' },
+  { id: 'MAHABHARATA', label: 'Mahabharata', description: 'Daily teachings of wisdom', group: 'Indian epics' },
   { id: 'QURAN', label: 'Quran verses', description: 'Arabic with English translation (Pickthall)' },
 ];
 

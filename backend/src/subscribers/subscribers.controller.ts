@@ -8,6 +8,7 @@ import { CreateSubscriberDto } from './dto/create-subscriber.dto';
 import { ManageTokenParams } from './dto/manage-token.dto';
 import { SubscriptionView } from './dto/subscription-view.dto';
 import { SubscribersService } from './subscribers.service';
+import { VERSE_TYPE_OPTIONS } from '../verses/verse-types';
 
 @ApiTags('Subscribers (public)')
 @Controller('subscribers')
@@ -28,16 +29,12 @@ export class SubscribersController {
       sendTime: schedule.dailySendTime,
       sendTimeLabel: formatClockTime(schedule.dailySendTime),
       timezone: this.config.get('APP_TIMEZONE'),
-      verseTypes: [
-        { id: 'BIBLE', label: 'Bible verses', description: 'King James Version' },
-        { id: 'GITA', label: 'Bhagavad Gita verses', description: 'English translation' },
-        { id: 'QURAN', label: 'Quran verses', description: 'Arabic with English translation (Pickthall)' },
-      ],
+      verseTypes: VERSE_TYPE_OPTIONS,
     };
   }
 
   @Post()
-  @ApiOperation({ summary: 'Subscribe a number (name, phone, verseType: BIBLE | GITA | QURAN)' })
+  @ApiOperation({ summary: 'Subscribe a number (name, phone, verseType: BIBLE | RAMAYANA | MAHABHARATA | QURAN)' })
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   subscribe(@Body() dto: CreateSubscriberDto): Promise<SubscriptionView> {
     return this.subscribers.subscribe(dto);

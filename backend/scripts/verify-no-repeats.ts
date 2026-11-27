@@ -1,8 +1,8 @@
 /**
  * Proves the no-repeat guarantee against your real database.
  *
- *   npm run verify:no-repeats              # both types (Bible takes ~1 minute)
- *   npm run verify:no-repeats -- QURAN     # one type (BIBLE | GITA | QURAN)
+ *   npm run verify:no-repeats              # every offered type (Bible takes ~1 minute)
+ *   npm run verify:no-repeats -- QURAN     # one type (BIBLE | RAMAYANA | MAHABHARATA | QURAN)
  *
  * For each verse type it creates a temporary test subscriber (status UNSUBSCRIBED, so nothing
  * is ever sent to it), then draws verses one "day" at a time with the exact selection code the
@@ -19,6 +19,7 @@ import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { VersesRepository } from '../src/verses/verses.repository';
 import { VersesService } from '../src/verses/verses.service';
+import { isInOrder } from '../src/verses/verse-types';
 
 // Load backend/.env (DATABASE_URL) the same way the app does.
 try {
@@ -60,6 +61,7 @@ async function verifyType(type: VerseType) {
   const sub = await testSubscriber(type);
   const seen = new Set<number>();
   const tierOf: number[] = [];
+  const indexes: number[] = [];
   let duplicates = 0;
   const started = Date.now();
   for (let day = 0; ; day++) {
@@ -68,6 +70,7 @@ async function verifyType(type: VerseType) {
     if (seen.has(verse.id)) duplicates++;
     seen.add(verse.id);
     tierOf.push(verse.rotationTier ?? 0);
+    indexes.push(verse.rotationIndex ?? -1);
     if ((day + 1) % 2000 === 0) console.log(`  … ${day + 1} days simulated`);
     if (day > pool + 10) break; // safety net: would mean verses are being repeated
   }
@@ -79,6 +82,9 @@ async function verifyType(type: VerseType) {
   const firstTier2 = tierOf.indexOf(2);
   const tier1AfterTier2 = firstTier2 >= 0 && tierOf.slice(firstTier2).includes(1);
   check(!tier1AfterTier2, 'primary tier fully used before the extended tier');
+  if (isInOrder(type)) {
+    check(indexes.every((idx, i) => idx === i), `read in order from part 1 to part ${indexes.length}`);
+  }
   check((await verses.nextVerse({ ...sub, progress: tierOf.length })) === null, 'nothing handed out once the pool is used up');
 
   // Concurrency: many workers asking for the same subscriber's next verse at the same moment.
@@ -91,9 +97,9 @@ async function verifyType(type: VerseType) {
 async function main() {
   const arg = process.argv[2]?.toUpperCase();
   const types =
-    arg === 'BIBLE' || arg === 'GITA' || arg === 'QURAN'
+    arg && (Object.values(VerseType) as string[]).includes(arg)
       ? [arg as VerseType]
-      : [VerseType.GITA, VerseType.QURAN, VerseType.BIBLE];
+      : [VerseType.RAMAYANA, VerseType.MAHABHARATA, VerseType.QURAN, VerseType.BIBLE];
   try {
     for (const type of types) await verifyType(type);
   } finally {

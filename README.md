@@ -1,6 +1,6 @@
 # Daily Verse on WhatsApp
 
-People enter their name and number on a React page, choose **Bible**, **Bhagavad Gita** or **Quran** verses,
+People enter their name and number on a React page, choose **Bible**, **Ramayana**, **Mahabharata** or **Quran** verses,
 get a personal welcome message right away, and then one verse every day (from the first day) on WhatsApp from
 **+91 89717 75506**. It's all free, self-hosted software: NestJS + Prisma +
 MySQL, with no per-message API costs.
@@ -58,7 +58,7 @@ A `console` provider logs messages instead of sending them, for development.
 
 ## 2. Verse content (stored in MySQL; free, openly licensed)
 
-All verses live in the MySQL **`verses`** table (Bible 31,102 · Gita 701 · Quran 6,236 rows). The
+All verses live in the MySQL **`verses`** table (Bible 31,102 verses · Ramayana 3,597 daily parts · Mahabharata 1,033 passages · Quran 6,236 ayahs). The
 app reads verses **only from the database**. The gzipped files below are just the one-time seed
 input: `npm run prisma:seed` loads them into `verses`, and nothing reads them afterwards.
 `GET /api/admin/reports/summary` → `versesInDatabase` shows the counts straight from MySQL.
@@ -66,14 +66,25 @@ input: `npm run prisma:seed` loads them into `verses`, and nothing reads them af
 | Type | Text | License | File |
 |---|---|---|---|
 | Bible | King James Version (1769), all 31,102 verses | Public domain | `backend/prisma/data/bible-kjv.json.gz` |
-| Bhagavad Gita | All 701 verses: Sanskrit + IAST transliteration + English by **Shri Purohit Swami** (1935) | Sanskrit/transliteration: public domain. Purohit Swami died in 1941, so the translation is public domain in India (life + 60 years). Compilation: Unlicense ([gita/gita](https://github.com/gita/gita)) | `backend/prisma/data/gita.json.gz` |
+| Ramayana | The whole of Valmiki's Ramayana in English verse by **Ralph T. H. Griffith** (1870–74, Books I–VI, 493 cantos, 52,660 lines), cut into 3,597 consecutive daily parts of ~14 lines | Public domain (Griffith died in 1906). Project Gutenberg eBook #24869 | `backend/prisma/data/ramayana.json.gz` |
+| Mahabharata | 1,033 short teaching passages from the English prose translation by **Kisari Mohan Ganguli** (1883–96), all 18 parvas | Public domain (Ganguli died in 1908). Project Gutenberg eBooks #15474–#15477 | `backend/prisma/data/mahabharata.json.gz` |
 | Quran | All 6,236 ayahs: Arabic (Uthmani script) + English by **Marmaduke Pickthall** (1930) | Pickthall died in 1936; the translation is public domain. Arabic text: *Tanzil Quran Text (Uthmani)*, [tanzil.net](https://tanzil.net), CC BY 3.0, used verbatim with this attribution | `backend/prisma/data/quran.json.gz` |
 
 The datasets (2.1 MB gzipped) ship in the repo and load during the seed. Nothing is fetched at
 runtime, so nothing can rate-limit you or disappear. `npm run datasets:build` regenerates them from
 the sources listed in [`scripts/build-datasets.mjs`](backend/scripts/build-datasets.mjs).
-If you serve users outside India, check the Purohit Swami translation's status in their
-jurisdictions. Swapping in another public-domain translation means changing one constant in that script.
+The two epics are handled differently:
+- **Ramayana: read as a story, in order.** Every subscriber starts at part 1 (Bala Kanda, Canto 1)
+  and gets the next part each day, so the story is read from beginning to end in about 9.9 years.
+  Each message shows the part number, kanda, canto and canto title, and ends with *To be continued
+  tomorrow…* (the last part ends the story).
+- **Mahabharata: daily teachings.** The builder keeps only short passages that read as a complete
+  teaching on their own (truth, duty, virtue, friendship, fate …) and leaves out battles, journeys
+  and dialogue fragments; they come in a random order like the Bible and Quran.
+
+> The Bhagavad Gita option was replaced by Ramayana / Mahabharata. Existing Gita subscribers are
+> moved to the Mahabharata (the Gita is part of it) by migration `20261127090000_ramayana_mahabharata`;
+> their history is kept. Old Gita rows stay in the `verses` table only for that history.
 
 ### How each day's verse is chosen
 
@@ -82,22 +93,26 @@ jurisdictions. Swapping in another public-domain translation means changing one 
    | | Tier 1 (sent first) | Tier 2 (after tier 1 is used up) | Total |
    |---|---|---|---|
    | **Bible** | 420 well-known verses from [`bible-daily-refs.txt`](backend/prisma/data/bible-daily-refs.txt) | 10,471 more verses that read well on their own (full sentences; no genealogies or mid-story fragments) | 10,891 ≈ **29.8 years** |
-   | **Gita** | 654 verses, chapters 2–18 | 47 verses of chapter 1 | all 701 ≈ **1.9 years** |
+   | **Ramayana** | all 3,597 parts **in reading order** (not shuffled; everyone starts at part 1) | — | 3,597 ≈ **9.9 years** |
+   | **Mahabharata** | 558 highest-scoring teaching passages | 475 more | 1,033 ≈ **2.8 years** |
    | **Quran** | 230 well-known ayahs from [`quran-daily-refs.txt`](backend/prisma/data/quran-daily-refs.txt) | 690 more ayahs on universal devotional themes (mercy, patience, prayer, gratitude, guidance). Ayahs about punishment, warfare, legal rulings or specific communities are left out, because a single ayah out of context can easily mislead | 920 ≈ **2.5 years** |
 
 2. Each subscriber starts at a random point in each tier (`rotationOffset`) and walks forward, so
-   different people get different verses on the same day.
+   different people get different verses on the same day. The Ramayana is the exception: everyone
+   starts at part 1 and reads in order (`IN_ORDER_VERSE_TYPES` in `src/verses/verse-types.ts`). If a
+   part fails permanently it is re-sent before the story moves on.
 3. **No verse is ever repeated for a subscriber.** Every verse handed to someone is recorded in
    `subscriber_verses` with `PRIMARY KEY (subscriberId, verseId)`. Selection skips recorded verses,
    and the record is written atomically *before* sending, so the database itself refuses a repeat:
    - retries of a failed send reuse the same delivery and the same verse (it's one message, not two);
    - after a crash mid-send the verse stays recorded, so it is skipped rather than sent again;
-   - switching between Bible and Gita, or unsubscribing and resubscribing, keeps the history;
+   - switching between verse types, or unsubscribing and resubscribing, keeps the history;
    - the history is never purged (unlike delivery rows).
    If a send fails permanently, the verse is released, so it can still be delivered on a later day.
 4. When a subscriber has received **every** verse of their type, they stop receiving verses
-   (`ON_VERSES_EXHAUSTED=stop`, the default) rather than seeing a repeat. For the Gita that is after
-   about 23 months. Set `ON_VERSES_EXHAUSTED=restart` to begin a new cycle instead.
+   (`ON_VERSES_EXHAUSTED=stop`, the default) rather than seeing a repeat. For the Quran, the
+   smallest pool, that is after about 2.5 years. Set `ON_VERSES_EXHAUSTED=restart` to begin a new
+   cycle instead (for the Ramayana: read the story again from part 1).
 5. Check it yourself: `npm run verify:no-repeats` simulates every day for a test subscriber
    until the pool is empty and checks for duplicates. The admin page also shows
    **Repeated verses: 0**, an audit across all deliveries.
@@ -151,7 +166,7 @@ verse-whatsapp/
 │   │   ├── schema.prisma
 │   │   ├── migrations/20261118000000_init/migration.sql
 │   │   ├── seed.ts               # idempotent, ~3 s, no network
-│   │   └── data/                 # bible-kjv.json.gz, gita.json.gz, bible-daily-refs.txt
+│   │   └── data/                 # bible, quran, ramayana, mahabharata (.json.gz) + *-daily-refs.txt
 │   ├── scripts/build-datasets.mjs
 │   └── src/
 │       ├── main.ts, app.module.ts
@@ -214,7 +229,7 @@ Tests: `cd backend && npm test`.
 | Method & path | Purpose |
 |---|---|
 | `GET /api/subscribers/options` | Verse types, opt-in mode, send time |
-| `POST /api/subscribers` `{name, phone, verseType: "BIBLE"\|"GITA"\|"QURAN"}` | Register. Returns the masked number, `manageToken` and, if pending, `confirmation {code, whatsappUrl, expiresAt}`. `409` if already active |
+| `POST /api/subscribers` `{name, phone, verseType: "BIBLE"\|"RAMAYANA"\|"MAHABHARATA"\|"QURAN"}` | Register. Returns the masked number, `manageToken` and, if pending, `confirmation {code, whatsappUrl, expiresAt}`. `409` if already active |
 | `GET /api/subscribers/manage/:token` | Status (polled by the UI while waiting for `JOIN`) |
 | `POST /api/subscribers/manage/:token/unsubscribe` | Opt out |
 | `GET /api/health` | DB + WhatsApp state |
@@ -333,8 +348,8 @@ The ones that matter most:
    it considers idle (very low CPU, network and memory over 7 days). This app's constant socket and
    cron usually count as activity, but keep an eye on it. Managed free databases have small storage
    and connection limits; the retention purge keeps this app small (~300 bytes per delivery row).
-8. **Translation licensing.** KJV is public domain (the UK's Crown patent aside). The Gita English
-   text is public domain in India but may still be copyrighted elsewhere. Pickthall's Quran
+8. **Translation licensing.** KJV is public domain (the UK's Crown patent aside). Griffith's
+   Ramayana and Ganguli's Mahabharata are public domain (both translators died over a century ago). Pickthall's Quran
    translation is public domain; the Arabic Quran text (Tanzil) is CC BY 3.0, so keep the
    attribution in §2 and don't alter the text. See §2.
 9. **Rate limiting is per replica (in memory).** That's enough for one or a few instances. Behind

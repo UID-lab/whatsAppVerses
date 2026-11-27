@@ -12,8 +12,12 @@ datasource db {
 
 enum VerseType {
   BIBLE
+  /// No longer offered at sign-up (replaced by RAMAYANA / MAHABHARATA). Kept so the delivery
+  /// history of earlier Gita verses stays intact.
   GITA
   QURAN
+  RAMAYANA
+  MAHABHARATA
 }
 
 enum SubscriberStatus {
@@ -83,22 +87,24 @@ model Subscriber {
 model Verse {
   id              Int       @id @default(autoincrement())
   type            VerseType
-  /// Human-readable reference, e.g. "John 3:16" or "Bhagavad Gita 2.47".
+  /// Human-readable reference, e.g. "John 3:16" or "Ramayana · Ayodhya Kanda, Canto 109".
   reference       String    @db.VarChar(64)
   book            String    @db.VarChar(40)
   chapter         Int       @db.SmallInt
   verse           Int       @db.SmallInt
   /// English text.
   text            String    @db.Text
-  /// Original-language text (Sanskrit for the Gita).
+  /// Original-language text (Arabic for the Quran; Sanskrit for the legacy Gita rows).
   originalText    String?   @db.Text
   transliteration String?   @db.Text
   translation     String    @db.VarChar(64)
-  /// Position in the deterministic, pre-shuffled rotation. NULL = not used for daily sends
+  /// Title of the chapter/canto, if the text has one (Ramayana: "Ráma Summoned").
+  chapterTitle    String?   @db.VarChar(120)
+  /// Position in the daily rotation (pre-shuffled; in reading order for the Ramayana). NULL = not used for daily sends
   /// (e.g. genealogies / sentence fragments).
   rotationIndex   Int?
-  /// 1 = primary pool (curated Bible verses / Gita chapters 2–18), used first.
-  /// 2 = extended pool (more stand-alone Bible verses / Gita chapter 1), used after tier 1.
+  /// 1 = primary pool (curated verses / best-scoring passages), used first.
+  /// 2 = extended pool (more stand-alone verses / passages), used after tier 1.
   /// Each tier occupies a contiguous rotationIndex range.
   rotationTier    Int?      @db.TinyInt
 

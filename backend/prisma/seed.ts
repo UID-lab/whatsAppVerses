@@ -14,7 +14,8 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 type BibleRow = { b: string; c: number; v: number; t: string };
-type GitaRow = { c: number; v: number; sa: string; tr: string; en: string | null };
+type RamayanaRow = { k: number; kn: string; c: number; ct: string; p: number; t: string };
+type MahabharataRow = { b: number; bn: string; s: number; p: number; t: string; tier: number };
 type QuranRow = { s: number; n: string; v: number; ar: string; en: string };
 
 const DATA_DIR = join(__dirname, 'data');
@@ -62,17 +63,26 @@ function loadDailyRefs(file = 'bible-daily-refs.txt'): string[] {
 type Row = Omit<Prisma.VerseCreateManyInput, 'rotationIndex' | 'rotationTier'>;
 type Slot = { index: number; tier: number };
 
+interface SeedOptions {
+  /** Keep each tier in the given order instead of shuffling it (the Ramayana is read in order). */
+  ordered?: boolean;
+  /** Also update text/reference/title of rows that already exist (dataset was re-cut). */
+  syncContent?: boolean;
+}
+
 /**
  * Inserts missing verses, then makes rotationIndex/rotationTier match the desired order.
  * `tiers` are lists of row indexes; tier 1 gets rotationIndex 0..n1-1, tier 2 continues after it,
- * each tier in its own seeded shuffle. Subscribers exhaust tier 1 before reaching tier 2.
+ * each tier in its own seeded shuffle (or in the given order). Subscribers exhaust tier 1 before
+ * reaching tier 2.
  */
-async function seedType(type: VerseType, rows: Row[], tiers: number[][], seed: number) {
+async function seedType(type: VerseType, rows: Row[], tiers: number[][], seed: number, opts: SeedOptions = {}) {
   const keyOf = (r: { book: string; chapter: number; verse: number }) => `${r.book}|${r.chapter}|${r.verse}`;
   const desired = new Map<string, Slot>();
   let next = 0;
   tiers.forEach((eligible, t) => {
-    shuffledIndexes(eligible.length, seed + t * 7919).forEach((pos) => {
+    const order = opts.ordered ? eligible.map((_, i) => i) : shuffledIndexes(eligible.length, seed + t * 7919);
+    order.forEach((pos) => {
       desired.set(keyOf(rows[eligible[pos]]), { index: next++, tier: t + 1 });
     });
   });
@@ -84,6 +94,25 @@ async function seedType(type: VerseType, rows: Row[], tiers: number[][], seed: n
       return { ...r, rotationIndex: slot?.index ?? null, rotationTier: slot?.tier ?? null };
     });
     inserted += (await prisma.verse.createMany({ data: chunk, skipDuplicates: true })).count;
+  }
+
+  let contentUpdated = 0;
+  if (opts.syncContent) {
+    const byKey = new Map(rows.map((r) => [keyOf(r), r]));
+    const existing = await prisma.verse.findMany({
+      where: { type },
+      select: { id: true, book: true, chapter: true, verse: true, text: true, reference: true, chapterTitle: true },
+    });
+    for (const v of existing) {
+      const r = byKey.get(keyOf(v));
+      if (r && (r.text !== v.text || r.reference !== v.reference || (r.chapterTitle ?? null) !== v.chapterTitle)) {
+        await prisma.verse.update({
+          where: { id: v.id },
+          data: { text: r.text, reference: r.reference, chapterTitle: r.chapterTitle ?? null },
+        });
+        contentUpdated++;
+      }
+    }
   }
 
   // Existing databases: rewrite the rotation only if it differs (e.g. bible-daily-refs.txt edited).
@@ -111,7 +140,7 @@ async function seedType(type: VerseType, rows: Row[], tiers: number[][], seed: n
       { timeout: 600_000 },
     );
   }
-  return { inserted, tierSizes: tiers.map((t) => t.length), rotationChanged: changes.length };
+  return { inserted, tierSizes: tiers.map((t) => t.length), rotationChanged: changes.length, contentUpdated };
 }
 
 /**
@@ -153,25 +182,47 @@ async function seedBible() {
   );
 }
 
-async function seedGita() {
-  const data = load<GitaRow>('gita.json.gz').filter((r) => r.en);
-  // Chapters 2–18 first; chapter 1 (mostly the roll-call of the armies) comes last.
-  const primary = data.map((r, i) => (r.c >= 2 ? i : -1)).filter((i) => i >= 0);
-  const chapterOne = data.map((r, i) => (r.c === 1 ? i : -1)).filter((i) => i >= 0);
+/**
+ * Ramayana (Griffith's English verse), read as a story: every daily part of the whole text, in
+ * reading order. Subscribers start at part 1 (rotationOffset 0, see IN_ORDER_VERSE_TYPES).
+ */
+async function seedRamayana() {
+  const data = load<RamayanaRow>('ramayana.json.gz');
   const rows: Row[] = data.map((r) => ({
-    type: VerseType.GITA,
-    reference: `Bhagavad Gita ${r.c}.${r.v}`,
-    book: 'Bhagavad Gita',
+    type: VerseType.RAMAYANA,
+    reference: `Ramayana ${r.k}.${r.c}.${r.p}`,
+    book: r.kn,
     chapter: r.c,
-    verse: r.v,
-    text: r.en as string,
-    originalText: r.sa,
-    transliteration: r.tr,
-    translation: 'Shri Purohit Swami',
+    verse: r.p,
+    chapterTitle: r.ct,
+    text: r.t,
+    translation: 'Ralph T. H. Griffith',
   }));
-  const res = await seedType(VerseType.GITA, rows, [primary, chapterOne], ROTATION_SEED + 1);
+  const res = await seedType(VerseType.RAMAYANA, rows, [data.map((_, i) => i)], ROTATION_SEED + 3, {
+    ordered: true,
+    syncContent: true,
+  });
   console.log(
-    `Bhagavad Gita: ${rows.length} verses (${res.inserted} new), rotation: ${res.tierSizes[0]} (ch. 2–18) + ${res.tierSizes[1]} (ch. 1) (${res.rotationChanged} rotation updates)`,
+    `Ramayana: ${rows.length} daily parts in reading order (${res.inserted} new, ${res.contentUpdated} updated, ${res.rotationChanged} rotation updates)`,
+  );
+}
+
+/** Mahabharata (Ganguli's English prose): short teaching passages scored by the builder. */
+async function seedMahabharata() {
+  const data = load<MahabharataRow>('mahabharata.json.gz');
+  const tier = (t: number) => data.map((r, i) => (r.tier === t ? i : -1)).filter((i) => i >= 0);
+  const rows: Row[] = data.map((r) => ({
+    type: VerseType.MAHABHARATA,
+    reference: `Mahabharata · ${r.bn}, Section ${r.s}`,
+    book: r.bn,
+    chapter: r.s,
+    verse: r.p,
+    text: r.t,
+    translation: 'Kisari Mohan Ganguli',
+  }));
+  const res = await seedType(VerseType.MAHABHARATA, rows, [tier(1), tier(2)], ROTATION_SEED + 4);
+  console.log(
+    `Mahabharata: ${rows.length} passages (${res.inserted} new), rotation: ${res.tierSizes[0]} + ${res.tierSizes[1]} (${res.rotationChanged} rotation updates)`,
   );
 }
 
@@ -220,7 +271,8 @@ async function seedQuran() {
 
 async function main() {
   await seedBible();
-  await seedGita();
+  await seedRamayana();
+  await seedMahabharata();
   await seedQuran();
 }
 

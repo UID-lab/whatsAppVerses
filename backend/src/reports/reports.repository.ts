@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DeliveryStatus, Prisma, SubscriberStatus, VerseType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { zeroByVerseType } from '../verses/verse-types';
 
 /** Read-only queries for the admin reports. Everything comes straight from MySQL. */
 @Injectable()
@@ -13,7 +14,7 @@ export class ReportsRepository {
       where: { status: SubscriberStatus.ACTIVE },
       _count: { _all: true },
     });
-    const out = { BIBLE: 0, GITA: 0, QURAN: 0 } as Record<VerseType, number>;
+    const out = zeroByVerseType();
     for (const r of rows) out[r.verseType] = r._count._all;
     return out;
   }

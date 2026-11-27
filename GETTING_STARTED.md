@@ -79,7 +79,8 @@ You should see:
 
 ```
 Bible (KJV): 31102 verses (31102 new), rotation: 420 curated + 10471 extended (0 rotation updates)
-Bhagavad Gita: 701 verses (701 new), rotation: 654 (ch. 2–18) + 47 (ch. 1) (0 rotation updates)
+Ramayana: 3597 daily parts in reading order (3597 new, 0 updated, 0 rotation updates)
+Mahabharata: 1033 passages (1033 new), rotation: 558 + 475 (0 rotation updates)
 Quran: 6236 ayahs (6236 new), rotation: 230 curated + 690 extended (0 rotation updates)
 ```
 
@@ -120,7 +121,7 @@ npm run dev
 | Admin (WhatsApp link, stats) | http://localhost:5173/admin (enter your `ADMIN_API_KEY`) |
 | **API docs (Swagger)** | http://localhost:3000/api/docs: click **Authorize**, paste your `ADMIN_API_KEY` |
 
-1. Enter your **name** and **WhatsApp number**, continue, and pick **Bible**, **Bhagavad Gita** or **Quran**.
+1. Enter your **name** and **WhatsApp number**, continue, and pick **Bible**, **Ramayana** or **Mahabharata** (the *Indian epics* block), or **Quran**.
 2. The page says **"Thank you, <name>!"**. The subscriber is saved right away, and this welcome
    message is sent (printed in the backend terminal in console mode):
 
@@ -279,7 +280,7 @@ All tests pass.
 cd ~/Desktop/verse-whatsapp/backend && npm run verify:no-repeats
 ```
 
-It simulates every day for a test subscriber until each pool is empty (Gita about 2 s, Bible about 2 minutes). Every line should be ✅, ending with `✅ No-repeat guarantee verified`. It cleans up after itself.
+It simulates every day for a test subscriber until each pool is empty (Ramayana about 10 s, Bible about 2 minutes). Every line should be ✅, ending with `✅ No-repeat guarantee verified`. It cleans up after itself.
 
 ### D. Sign-up flow
 
@@ -290,7 +291,7 @@ It simulates every day for a test subscriber until each pool is empty (Gita abou
    - empty name → "Please enter your name."
    - an invalid number → "Please enter a valid mobile number"
    - the same number again → "This number is already subscribed"
-4. Sign up a second number with **Bhagavad Gita**.
+4. Sign up a second number with **Ramayana** or **Mahabharata**.
 
 ### E. Simulate several days
 

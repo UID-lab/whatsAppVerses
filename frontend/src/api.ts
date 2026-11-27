@@ -1,4 +1,5 @@
-export type VerseType = 'BIBLE' | 'GITA' | 'QURAN';
+/** GITA is legacy (no longer offered); it can still appear on an old subscription. */
+export type VerseType = 'BIBLE' | 'RAMAYANA' | 'MAHABHARATA' | 'QURAN' | 'GITA';
 export type SubscriberStatus = 'PENDING' | 'ACTIVE' | 'UNSUBSCRIBED';
 
 export interface Subscription {
@@ -16,7 +17,8 @@ export interface Options {
   sendTime: string;
   sendTimeLabel: string;
   timezone: string;
-  verseTypes: { id: VerseType; label: string; description: string }[];
+  /** Options sharing a `group` are shown together as one block. */
+  verseTypes: { id: VerseType; label: string; description: string; group?: string }[];
 }
 
 export class ApiError extends Error {

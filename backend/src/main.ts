@@ -44,7 +44,7 @@ async function bootstrap() {
   const openApi = new DocumentBuilder()
     .setTitle('Daily Verse API')
     .setDescription(
-      'Bible, Bhagavad Gita and Quran verses on WhatsApp. Public sign-up endpoints, plus admin reports: ' +
+      'Bible, Ramayana, Mahabharata and Quran verses on WhatsApp. Public sign-up endpoints, plus admin reports: ' +
         'active subscribers, delivered / failed counts, delivery history with timestamps, and the no-repeat check.',
     )
     .setVersion('1.0')

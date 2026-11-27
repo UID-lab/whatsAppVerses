@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AttemptOutcome, DeliveryKind, DeliveryStatus, Prisma, SubscriberStatus } from '@prisma/client';
 import { randomInt } from 'node:crypto';
+import { withDbRetry } from '../common/db/db-retry';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -20,10 +21,17 @@ export type ClaimedDelivery = Prisma.DeliveryGetPayload<{ include: { subscriber:
  *  - Claim: SELECT … FOR UPDATE SKIP LOCKED, so concurrent workers never grab the same row and
  *    never block each other.
  *  - Leases: claimed rows carry lockedBy/lockedUntil; a reaper returns abandoned rows.
+ *  - Lock conflicts: every write runs through `db()`, which re-runs a statement/transaction that
+ *    MySQL rolled back because of a deadlock or lock wait timeout (all writes are repeatable).
  */
 @Injectable()
 export class DeliveryRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  /** Runs a write (one statement or one whole transaction), retrying transient lock conflicts. */
+  private db<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    return withDbRetry(fn, { label });
+  }
 
   // ---- enqueue ------------------------------------------------------------------------------
 
@@ -40,16 +48,18 @@ export class DeliveryRepository {
       });
       if (batch.length === 0) break;
       const now = Date.now();
-      const res = await this.prisma.delivery.createMany({
-        data: batch.map((s) => ({
-          subscriberId: s.id,
-          deliveryDate: date,
-          kind: DeliveryKind.DAILY,
-          // Random spread = random send order, so if capacity runs out it isn't always the same people.
-          nextAttemptAt: new Date(now + randomInt(SPREAD_SECONDS) * 1000),
-        })),
-        skipDuplicates: true,
-      });
+      const res = await this.db('enqueue', () =>
+        this.prisma.delivery.createMany({
+          data: batch.map((s) => ({
+            subscriberId: s.id,
+            deliveryDate: date,
+            kind: DeliveryKind.DAILY,
+            // Random spread = random send order, so if capacity runs out it isn't always the same people.
+            nextAttemptAt: new Date(now + randomInt(SPREAD_SECONDS) * 1000),
+          })),
+          skipDuplicates: true,
+        }),
+      );
       inserted += res.count;
       lastId = batch[batch.length - 1].id;
       if (batch.length < batchSize) break;
@@ -103,7 +113,17 @@ export class DeliveryRepository {
   // ---- claim & state transitions --------------------------------------------------------------
 
   async claim(owner: string, limit: number, lockSeconds: number, welcomeOnly: boolean): Promise<ClaimedDelivery[]> {
-    const ids = await this.prisma.$transaction(async (tx) => {
+    const ids = await this.db('claim', () => this.claimIds(owner, limit, lockSeconds, welcomeOnly));
+    if (ids.length === 0) return [];
+    return this.prisma.delivery.findMany({
+      where: { id: { in: ids } },
+      include: { subscriber: true, verse: true },
+      orderBy: { nextAttemptAt: 'asc' },
+    });
+  }
+
+  private claimIds(owner: string, limit: number, lockSeconds: number, welcomeOnly: boolean): Promise<bigint[]> {
+    return this.prisma.$transaction(async (tx) => {
       const kindFilter = welcomeOnly ? Prisma.sql`AND kind = 'WELCOME'` : Prisma.empty;
       const rows = await tx.$queryRaw<{ id: bigint }[]>`
         SELECT id FROM deliveries
@@ -120,16 +140,10 @@ export class DeliveryRepository {
         WHERE id IN (${Prisma.join(claimed)})`;
       return claimed;
     });
-    if (ids.length === 0) return [];
-    return this.prisma.delivery.findMany({
-      where: { id: { in: ids } },
-      include: { subscriber: true, verse: true },
-      orderBy: { nextAttemptAt: 'asc' },
-    });
   }
 
   async assignVerse(id: bigint, verseId: number): Promise<void> {
-    await this.prisma.delivery.update({ where: { id }, data: { verseId } });
+    await this.db('assignVerse', () => this.prisma.delivery.update({ where: { id }, data: { verseId } }));
   }
 
   /**
@@ -138,7 +152,7 @@ export class DeliveryRepository {
    * (1, 2, 3 …). Returns that attempt's id, or null if this worker lost its claim.
    */
   async markSending(id: bigint, owner: string): Promise<bigint | null> {
-    return this.prisma.$transaction(async (tx) => {
+    return this.db('markSending', () => this.prisma.$transaction(async (tx) => {
       const res = await tx.delivery.updateMany({
         where: { id, status: DeliveryStatus.PROCESSING, lockedBy: owner },
         data: { status: DeliveryStatus.SENDING, lockedUntil: new Date(Date.now() + 5 * 60_000) },
@@ -147,7 +161,7 @@ export class DeliveryRepository {
       const previous = await tx.deliveryAttempt.count({ where: { deliveryId: id } });
       const attempt = await tx.deliveryAttempt.create({ data: { deliveryId: id, attemptNo: previous + 1 } });
       return attempt.id;
-    });
+    }));
   }
 
   /** `advanceProgress` is false for the welcome greeting, which carries no verse. */
@@ -161,7 +175,7 @@ export class DeliveryRepository {
   ) {
     const step = advanceProgress ? 1 : 0;
     const now = new Date();
-    await this.prisma.$transaction([
+    await this.db('markSent', () => this.prisma.$transaction([
       this.prisma.delivery.update({
         where: { id },
         data: {
@@ -183,13 +197,13 @@ export class DeliveryRepository {
         SET progress = progress + ${step}, lastDeliveredAt = NOW(3), consecutiveFailures = 0,
             channelAddress = COALESCE(channelAddress, ${resolvedAddress ?? null}), updatedAt = NOW(3)
         WHERE id = ${subscriberId}`,
-    ]);
+    ]));
   }
 
   /** A failed attempt that will be retried automatically after `delayMs`. */
   async markRetry(id: bigint, error: string, delayMs: number, attemptId: bigint): Promise<void> {
     const now = new Date();
-    await this.prisma.$transaction([
+    await this.db('markRetry', () => this.prisma.$transaction([
       this.prisma.deliveryAttempt.update({
         where: { id: attemptId },
         data: { outcome: AttemptOutcome.FAILED, error: error.slice(0, 500), finishedAt: now },
@@ -200,7 +214,7 @@ export class DeliveryRepository {
             lockedBy = NULL, lockedUntil = NULL, firstFailedAt = COALESCE(firstFailedAt, ${now}),
             lastFailedAt = ${now}, updatedAt = NOW(3)
         WHERE id = ${id}`,
-    ]);
+    ]));
   }
 
   /**
@@ -208,7 +222,7 @@ export class DeliveryRepository {
    * loaded yet …). If an attempt row was opened for it, it is removed: nothing was sent.
    */
   async defer(id: bigint, reason: string, delayMs: number, attemptId?: bigint | null): Promise<void> {
-    await this.prisma.$transaction([
+    await this.db('defer', () => this.prisma.$transaction([
       ...(attemptId ? [this.prisma.deliveryAttempt.delete({ where: { id: attemptId } })] : []),
       this.prisma.delivery.update({
         where: { id },
@@ -221,7 +235,7 @@ export class DeliveryRepository {
           attempts: { decrement: 1 },
         },
       }),
-    ]);
+    ]));
   }
 
   /**
@@ -231,7 +245,7 @@ export class DeliveryRepository {
    */
   async markFailed(id: bigint, subscriberId: number, error: string, permanent: boolean, attemptId: bigint): Promise<void> {
     const now = new Date();
-    await this.prisma.$transaction([
+    await this.db('markFailed', () => this.prisma.$transaction([
       this.prisma.deliveryAttempt.update({
         where: { id: attemptId },
         data: { outcome: AttemptOutcome.FAILED, error: error.slice(0, 500), finishedAt: now },
@@ -243,7 +257,7 @@ export class DeliveryRepository {
             firstFailedAt = COALESCE(firstFailedAt, ${now}), lastFailedAt = ${now}, updatedAt = NOW(3)
         WHERE id = ${id}`,
       this.prisma.subscriber.update({ where: { id: subscriberId }, data: { consecutiveFailures: { increment: 1 } } }),
-    ]);
+    ]));
   }
 
   /**
@@ -265,7 +279,7 @@ export class DeliveryRepository {
       ...(opts.maxRequeues !== undefined ? { requeueCount: { lt: opts.maxRequeues } } : {}),
     };
     if (!opts.ids) where.status = DeliveryStatus.FAILED; // the sweep never revives EXPIRED days
-    const res = await this.prisma.delivery.updateMany({
+    const res = await this.db('requeueFailed', () => this.prisma.delivery.updateMany({
       where,
       data: {
         status: DeliveryStatus.PENDING,
@@ -276,15 +290,17 @@ export class DeliveryRepository {
         lockedUntil: null,
         requeueCount: { increment: 1 },
       },
-    });
+    }));
     return res.count;
   }
 
   async markSkipped(id: bigint, reason: string): Promise<void> {
-    await this.prisma.delivery.update({
-      where: { id },
-      data: { status: DeliveryStatus.SKIPPED, lastError: reason, lockedBy: null, lockedUntil: null },
-    });
+    await this.db('markSkipped', () =>
+      this.prisma.delivery.update({
+        where: { id },
+        data: { status: DeliveryStatus.SKIPPED, lastError: reason, lockedBy: null, lockedUntil: null },
+      }),
+    );
   }
 
   /**
@@ -308,29 +324,48 @@ export class DeliveryRepository {
 
   /** On graceful shutdown: give back rows we claimed but never started sending. */
   async releaseClaims(owner: string): Promise<number> {
-    return this.prisma.$executeRaw`
+    return this.db('releaseClaims', () => this.prisma.$executeRaw`
       UPDATE deliveries SET status = 'PENDING', lockedBy = NULL, lockedUntil = NULL,
              attempts = GREATEST(attempts - 1, 0), updatedAt = NOW(3)
-      WHERE status = 'PROCESSING' AND lockedBy = ${owner}`;
+      WHERE status = 'PROCESSING' AND lockedBy = ${owner}`);
   }
 
   // ---- maintenance ----------------------------------------------------------------------------
 
-  /** Return abandoned claims to the queue; mark interrupted sends UNKNOWN (no duplicate risk). */
+  /**
+   * Return abandoned claims to the queue; mark interrupted sends UNKNOWN (no duplicate risk).
+   * Finds the rows with a plain (non-locking) read first, then updates them by primary key, so it
+   * only locks those few rows and can't deadlock with the worker over index ranges. The UPDATEs
+   * re-check status and lockedUntil, so a row the worker finished in between is left alone.
+   */
   async reapStale(): Promise<{ requeued: number; unknown: number }> {
-    const requeued = await this.prisma.$executeRaw`
-      UPDATE deliveries SET status = 'PENDING', lockedBy = NULL, lockedUntil = NULL, updatedAt = NOW(3)
-      WHERE status = 'PROCESSING' AND lockedUntil < NOW(3)`;
-    const unknown = await this.prisma.$executeRaw`
-      UPDATE deliveries
-      SET status = 'UNKNOWN', lockedBy = NULL, lockedUntil = NULL, updatedAt = NOW(3),
-          lastError = 'Sender stopped mid-send; not retried to avoid a duplicate'
-      WHERE status = 'SENDING' AND lockedUntil < NOW(3)`;
-    if (unknown > 0) {
-      await this.prisma.$executeRaw`
-        UPDATE delivery_attempts a JOIN deliveries d ON d.id = a.deliveryId
-        SET a.outcome = 'UNKNOWN', a.finishedAt = NOW(3), a.error = 'Sender stopped mid-send'
-        WHERE d.status = 'UNKNOWN' AND a.finishedAt IS NULL`;
+    const stale = await this.prisma.$queryRaw<{ id: bigint; status: string }[]>`
+      SELECT id, status FROM deliveries
+      WHERE status IN ('PROCESSING', 'SENDING') AND lockedUntil < NOW(3)
+      LIMIT ${MAINTENANCE_CHUNK}`;
+    const processing = stale.filter((r) => r.status === 'PROCESSING').map((r) => r.id);
+    const sending = stale.filter((r) => r.status === 'SENDING').map((r) => r.id);
+    let requeued = 0;
+    let unknown = 0;
+    if (processing.length) {
+      requeued = await this.db('reap', () => this.prisma.$executeRaw`
+        UPDATE deliveries SET status = 'PENDING', lockedBy = NULL, lockedUntil = NULL, updatedAt = NOW(3)
+        WHERE id IN (${Prisma.join(processing)}) AND status = 'PROCESSING' AND lockedUntil < NOW(3)`);
+    }
+    if (sending.length) {
+      unknown = await this.db('reap', () => this.prisma.$transaction([
+        this.prisma.$executeRaw`
+          UPDATE delivery_attempts SET outcome = 'UNKNOWN', finishedAt = NOW(3), error = 'Sender stopped mid-send'
+          WHERE deliveryId IN (${Prisma.join(sending)}) AND finishedAt IS NULL
+            AND deliveryId IN (SELECT id FROM (
+              SELECT id FROM deliveries WHERE id IN (${Prisma.join(sending)}) AND status = 'SENDING' AND lockedUntil < NOW(3)
+            ) AS still_stale)`,
+        this.prisma.$executeRaw`
+          UPDATE deliveries
+          SET status = 'UNKNOWN', lockedBy = NULL, lockedUntil = NULL, updatedAt = NOW(3),
+              lastError = 'Sender stopped mid-send; not retried to avoid a duplicate'
+          WHERE id IN (${Prisma.join(sending)}) AND status = 'SENDING' AND lockedUntil < NOW(3)`,
+      ])).then(([, n]) => n);
     }
     return { requeued, unknown };
   }
@@ -339,10 +374,10 @@ export class DeliveryRepository {
   async expireBefore(date: Date): Promise<number> {
     let total = 0;
     for (;;) {
-      const n = await this.prisma.$executeRaw`
+      const n = await this.db('expire', () => this.prisma.$executeRaw`
         UPDATE deliveries SET status = 'EXPIRED', lockedBy = NULL, lockedUntil = NULL, updatedAt = NOW(3)
         WHERE deliveryDate < ${date} AND status = 'PENDING'
-        LIMIT ${MAINTENANCE_CHUNK}`;
+        LIMIT ${MAINTENANCE_CHUNK}`);
       total += n;
       if (n < MAINTENANCE_CHUNK) return total;
     }
@@ -352,8 +387,8 @@ export class DeliveryRepository {
   async purgeBefore(date: Date): Promise<number> {
     let total = 0;
     for (;;) {
-      const n = await this.prisma.$executeRaw`
-        DELETE FROM deliveries WHERE deliveryDate < ${date} LIMIT ${MAINTENANCE_CHUNK}`;
+      const n = await this.db('purge', () => this.prisma.$executeRaw`
+        DELETE FROM deliveries WHERE deliveryDate < ${date} LIMIT ${MAINTENANCE_CHUNK}`);
       total += n;
       if (n < MAINTENANCE_CHUNK) return total;
     }
@@ -364,11 +399,13 @@ export class DeliveryRepository {
   }
 
   async recordJobRun(job: string, date: Date, enqueued: number): Promise<void> {
-    await this.prisma.jobRun.upsert({
-      where: { job_runDate: { job, runDate: date } },
-      create: { job, runDate: date, enqueued },
-      update: { enqueued, completedAt: new Date() },
-    });
+    await this.db('recordJobRun', () =>
+      this.prisma.jobRun.upsert({
+        where: { job_runDate: { job, runDate: date } },
+        create: { job, runDate: date, enqueued },
+        update: { enqueued, completedAt: new Date() },
+      }),
+    );
   }
 
   async statusCounts(date: Date): Promise<Record<string, number>> {

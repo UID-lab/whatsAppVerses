@@ -73,6 +73,13 @@ a { color: var(--accent); }
 .choice { background: rgb(255 255 255 / 0.03); }
 .choice:hover:not(:disabled) { border-color: #a78bfa; background: var(--accent-soft); }
 .choice-icon { grid-row: span 2; font-size: 30px; line-height: 44px; text-align: center; }
+.choice-group { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: linear-gradient(135deg, rgb(251 191 36 / 0.07), rgb(219 39 119 / 0.07)); }
+.choice-group-title { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 4px 10px; }
+.choice-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.choice-half { grid-template-columns: 1fr; grid-template-rows: auto auto auto; align-content: start; text-align: center; justify-items: center; row-gap: 2px; padding: 14px 10px; }
+.choice-half .choice-icon { grid-row: auto; line-height: 1.2; font-size: 32px; }
+.choice-half .spinner { right: 10px; top: 10px; }
+@media (max-width: 360px) { .choice-split { grid-template-columns: 1fr; } }
 .choice-title { font-weight: 700; }
 .choice-desc { color: var(--muted); font-size: 14px; }
 .choice .spinner { position: absolute; right: 16px; top: calc(50% - 9px); }
